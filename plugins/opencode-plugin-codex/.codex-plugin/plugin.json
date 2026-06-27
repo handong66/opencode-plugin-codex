@@ -1,0 +1,41 @@
+{
+  "name": "opencode-plugin-codex",
+  "version": "0.1.0",
+  "description": "Use OpenCode from Codex, including Codex-thread transfer into OpenCode sessions.",
+  "author": {
+    "name": "handong66",
+    "url": "https://github.com/handong66"
+  },
+  "homepage": "https://github.com/handong66/opencode-plugin-codex",
+  "repository": "https://github.com/handong66/opencode-plugin-codex",
+  "license": "MIT",
+  "keywords": [
+    "opencode",
+    "codex",
+    "mcp",
+    "agent",
+    "transfer"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "OpenCode for Codex",
+    "shortDescription": "Run OpenCode and transfer Codex threads",
+    "longDescription": "Call OpenCode from Codex for runs, reviews, rescue analysis, adversarial review, job management, and Codex-thread transfer into OpenCode sessions.",
+    "developerName": "handong66",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/handong66/opencode-plugin-codex",
+    "privacyPolicyURL": "https://github.com/handong66/opencode-plugin-codex",
+    "termsOfServiceURL": "https://github.com/handong66/opencode-plugin-codex",
+    "defaultPrompt": [
+      "Use OpenCode to review the current diff.",
+      "Transfer this Codex thread to OpenCode.",
+      "Run OpenCode on this repo task."
+    ],
+    "brandColor": "#111827"
+  }
+}

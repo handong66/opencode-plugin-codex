@@ -1,0 +1,6 @@
+node_modules/
+.opencode-plugin-codex/
+.venv/
+coverage/
+.DS_Store
+*.log

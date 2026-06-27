@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "opencode-plugin-codex": {
+      "title": "OpenCode for Codex",
+      "description": "Run OpenCode from Codex and transfer Codex threads into OpenCode sessions.",
+      "cwd": ".",
+      "command": "node",
+      "args": [
+        "./dist/server.js"
+      ],
+      "env_vars": [
+        "OPENCODE_BIN",
+        "CODEX_THREAD_ID",
+        "CODEX_HOME",
+        "HOME",
+        "PATH"
+      ]
+    }
+  }
+}

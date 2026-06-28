@@ -35,7 +35,7 @@ The current tool registry lives in `src/server.ts` and is smoke-tested by `../..
 - `opencode_result`
 - `opencode_cancel`
 
-For `opencode_run`, put task instructions in `prompt`; `files` is only for existing filesystem paths to attach.
+For `opencode_run`, put task instructions in `prompt`; `files` is only for existing filesystem paths to attach. The plugin sends the prompt before `--file` arguments so OpenCode does not parse prompt text as another attachment.
 
 ## Local OpenCode Discovery
 

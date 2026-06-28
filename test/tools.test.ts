@@ -27,7 +27,7 @@ describe("opencodeRun", () => {
     expect(result.stdout).not.toContain("--file");
   });
 
-  test("keeps explicit file attachments on the --file channel", async () => {
+  test("puts the message before file attachments so OpenCode does not parse it as a file", async () => {
     const result = parseToolResult(
       await opencodeRun({
         opencodeBin: "/bin/echo",
@@ -39,7 +39,10 @@ describe("opencodeRun", () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(result.stdout).toContain("--file README.md review this file");
+    const stdout = result.stdout ?? "";
+    expect(stdout).toContain("review this file");
+    expect(stdout).toContain("--file README.md");
+    expect(stdout.indexOf("review this file")).toBeLessThan(stdout.indexOf("--file README.md"));
   });
 
   test("rejects prompt-like text passed through files before OpenCode treats it as a path", async () => {

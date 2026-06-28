@@ -40,9 +40,9 @@ function buildRunArgs(params: {
   if (params.sessionId) args.push("--session", params.sessionId);
   if (params.fork) args.push("--fork");
   if (params.title) args.push("--title", params.title);
-  for (const file of params.files ?? []) args.push("--file", file);
   if (params.dangerouslySkipPermissions) args.push("--dangerously-skip-permissions");
   args.push(params.prompt);
+  for (const file of params.files ?? []) args.push("--file", file);
   return args;
 }
 

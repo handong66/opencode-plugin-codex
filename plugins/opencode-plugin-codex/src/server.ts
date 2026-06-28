@@ -53,9 +53,12 @@ server.registerTool(
     description: "Start an OpenCode task from Codex.",
     inputSchema: {
       ...commonShape,
-      prompt: z.string(),
+      prompt: z.string().describe("Task instructions or message to send to OpenCode. Put long prompts and task text here, not in files."),
       agent: z.string().optional(),
-      files: z.array(z.string()).optional(),
+      files: z
+        .array(z.string().describe("Existing filesystem path to attach. Do not put prompt text, task descriptions, or file contents here."))
+        .optional()
+        .describe("Optional existing file paths to attach to the OpenCode message."),
       title: z.string().optional(),
       background: z.boolean().optional(),
       timeoutMs: z.number().int().positive().optional(),
@@ -73,7 +76,7 @@ server.registerTool(
     inputSchema: {
       ...commonShape,
       sessionId: z.string(),
-      prompt: z.string(),
+      prompt: z.string().describe("Task instructions or message to send to OpenCode."),
       fork: z.boolean().optional(),
       background: z.boolean().optional(),
       timeoutMs: z.number().int().positive().optional()

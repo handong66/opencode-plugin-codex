@@ -1,6 +1,6 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { classifyOpenCodeFailure, discoverOpenCode, runOpenCode, splitModel } from "./opencode-cli.js";
 import { findCodexRolloutFile, readCodexTranscriptFromRollout } from "./codex-rollout.js";
 import { toOpenCodeSession } from "./opencode-session.js";
@@ -46,6 +46,33 @@ function buildRunArgs(params: {
   return args;
 }
 
+function describeFileValue(file: string): string {
+  const singleLine = file.replace(/\s+/g, " ").trim();
+  return JSON.stringify(singleLine.length > 80 ? `${singleLine.slice(0, 77)}...` : singleLine);
+}
+
+async function validateFileAttachments(files: string[] | undefined, cwd: string): Promise<void> {
+  for (const file of files ?? []) {
+    if (!file.trim()) {
+      throw new Error("files only accepts filesystem paths. Put task text in prompt.");
+    }
+    if (file !== file.trim() || /[\r\n]/.test(file) || file.length > 1_024) {
+      throw new Error(
+        `files only accepts filesystem paths. Put long task text in prompt instead of files: ${describeFileValue(file)}`
+      );
+    }
+
+    const filePath = isAbsolute(file) ? file : resolve(cwd, file);
+    try {
+      await access(filePath);
+    } catch {
+      throw new Error(
+        `File attachment not found: ${describeFileValue(file)}. files only accepts existing filesystem paths; put task text in prompt.`
+      );
+    }
+  }
+}
+
 async function runOrStartJob(params: {
   kind: "run" | "continue" | "rescue" | "review" | "adversarial_review" | "transfer";
   prompt: string;
@@ -62,6 +89,7 @@ async function runOrStartJob(params: {
   dangerouslySkipPermissions?: boolean;
 }) {
   const cwd = cwdOrDefault(params.cwd);
+  await validateFileAttachments(params.files, cwd);
   const args = buildRunArgs({ ...params, cwd });
   if (params.background ?? true) {
     const store = new JobStore(cwd);

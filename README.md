@@ -32,6 +32,8 @@ The MCP tool registry is defined in `plugins/opencode-plugin-codex/src/server.ts
 - `opencode_result`
 - `opencode_cancel`
 
+For `opencode_run`, put the task instructions in `prompt`. Use `files` only for existing filesystem paths to attach; the server rejects prompt-like text in `files` before OpenCode can treat it as a missing path.
+
 ## Requirements
 
 - Node.js `>=22`

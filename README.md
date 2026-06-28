@@ -1,49 +1,108 @@
 # opencode-plugin-codex
 
-A Codex plugin that lets Codex use OpenCode. It is the reverse-direction companion idea to `openai/codex-plugin-cc`: instead of using Codex inside another agent, this plugin exposes OpenCode inside Codex.
+Use OpenCode from Codex. This repository packages a Codex plugin with a bundled stdio MCP server so Codex can start OpenCode tasks, continue OpenCode sessions, run second-agent reviews, and transfer visible Codex thread history into an OpenCode session.
 
-## Status
+This is the reverse-direction companion idea to `openai/codex-plugin-cc`: instead of using Codex inside another agent, this plugin exposes OpenCode inside Codex.
 
-Implemented:
+## Current Status
 
-- Codex plugin manifest and repo-local marketplace.
-- Bundled stdio MCP server.
-- OpenCode CLI discovery and diagnostics.
-- OpenCode run/continue/rescue/review/adversarial-review tools.
-- Background job store with status/result/cancel tools.
-- Codex rollout JSONL parser.
-- Codex visible transcript to OpenCode import JSON conversion.
-- `opencode_transfer` using `opencode import`.
+Implemented and locally verified:
+
+- Codex plugin manifest and repo-local marketplace metadata.
+- Bundled Node-based stdio MCP server.
+- OpenCode CLI discovery through explicit argument, environment, common install paths, and `PATH`.
+- OpenCode run, continue, rescue, review, and adversarial-review tools.
+- Background OpenCode job status, result, and cancel tools.
+- Codex rollout JSONL parser for visible user/assistant transcript.
+- Codex-visible transcript to OpenCode import JSON conversion.
+- `opencode_transfer` using `opencode import`, with optional post-import continuation.
+
+## Tool Surface
+
+The MCP tool registry is defined in `plugins/opencode-plugin-codex/src/server.ts`. Keep this list aligned with that file and `scripts/smoke-mcp.mjs`.
+
+- `opencode_check`
+- `opencode_run`
+- `opencode_continue`
+- `opencode_rescue`
+- `opencode_review`
+- `opencode_adversarial_review`
+- `opencode_transfer`
+- `opencode_status`
+- `opencode_result`
+- `opencode_cancel`
+
+## Requirements
+
+- Node.js `>=22`
+- npm
+- Codex with local plugin marketplace support
+- OpenCode CLI for live OpenCode actions
+
+The MCP server discovers OpenCode in this order:
+
+1. Tool argument `opencodeBin`.
+2. `OPENCODE_BIN`.
+3. `~/.opencode/bin/opencode`.
+4. `/opt/homebrew/bin/opencode`.
+5. `/usr/local/bin/opencode`.
+6. `PATH`.
 
 ## Install From This Repository
 
-Build the MCP server:
+Build the bundled MCP server:
 
 ```bash
 npm install
 npm run build
 ```
 
-Add the repo marketplace to Codex if it is not already configured:
+Add this repository as a Codex plugin marketplace if it is not already configured:
 
 ```bash
 codex plugin marketplace add /Users/domo/Downloads/opencode-plugin-codex
 ```
 
-Then install `opencode-plugin-codex` from that marketplace in the Codex plugin directory or CLI.
+Then install `opencode-plugin-codex` from that marketplace in Codex.
 
 ## Development
 
+Run the full local check before publishing README, manifest, MCP server, or tool changes:
+
 ```bash
 npm run check
+git diff --check
 ```
 
-Live OpenCode integration depends on local provider/model access:
+`npm run check` performs:
+
+1. TypeScript typecheck.
+2. MCP server bundle build.
+3. Vitest unit tests.
+4. Repository plugin validation.
+5. MCP smoke test that lists all expected tools.
+
+Live OpenCode transfer verification depends on local provider/model access:
 
 ```bash
 OPENCODE_BIN="$HOME/.opencode/bin/opencode" \
 OPENCODE_MODEL="aihubmix/gemini-3-flash-preview" \
-npm run test:integration
+npm run smoke:live-transfer
 ```
 
-See [docs/development.md](docs/development.md) for the complete design and implementation plan.
+## Privacy Boundary
+
+`opencode_transfer` imports visible user/assistant transcript text into OpenCode's local session database. By default it does not include Codex system messages, developer messages, tool outputs, or reasoning.
+
+## Documentation Governance
+
+To avoid documentation drift, treat these files as having different authority:
+
+- `README.md`: current user-facing source of truth for install, capabilities, requirements, and verification commands.
+- `plugins/opencode-plugin-codex/README.md`: concise marketplace/plugin-directory summary. Keep it short and point back here for full details.
+- `docs/verification.md`: dated verification ledger. Update it when new smoke, audit, or live-transfer evidence is collected.
+- `docs/development.md`: historical design and implementation notes. It may describe planned layouts or earlier environment snapshots; do not treat it as the current repo contract without checking source files.
+- `plugins/opencode-plugin-codex/src/server.ts`: authoritative MCP tool registry.
+- `scripts/smoke-mcp.mjs`: executable guard for the tool list published in this README.
+
+When changing tools, install steps, discovery behavior, transfer privacy, or verification commands, update this README in the same commit as the code or manifest change.

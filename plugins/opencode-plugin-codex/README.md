@@ -1,6 +1,6 @@
 # OpenCode for Codex
 
-This plugin lets Codex call OpenCode through a bundled MCP server.
+This plugin lets Codex call OpenCode through a bundled MCP server. The full repository README is the canonical source for installation, verification, and documentation governance.
 
 Core capabilities:
 
@@ -13,11 +13,27 @@ Core capabilities:
 
 ## Build
 
+From the repository root:
+
 ```bash
 npm install
-npm run build
-npm test
+npm run check
 ```
+
+## MCP Tools
+
+The current tool registry lives in `src/server.ts` and is smoke-tested by `../../scripts/smoke-mcp.mjs`.
+
+- `opencode_check`
+- `opencode_run`
+- `opencode_continue`
+- `opencode_rescue`
+- `opencode_review`
+- `opencode_adversarial_review`
+- `opencode_transfer`
+- `opencode_status`
+- `opencode_result`
+- `opencode_cancel`
 
 ## Local OpenCode Discovery
 
@@ -32,4 +48,4 @@ The MCP server discovers OpenCode in this order:
 
 ## Transfer Privacy
 
-`opencode_transfer` imports visible user/assistant transcript text into the local OpenCode database. It does not include Codex developer/system messages, tool outputs, or reasoning by default.
+`opencode_transfer` imports visible user/assistant transcript text into OpenCode's local session database. It does not include Codex developer/system messages, tool outputs, or reasoning by default.

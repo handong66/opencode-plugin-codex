@@ -63,4 +63,30 @@ describe("opencodeRun", () => {
       })
     ).rejects.toThrow(/files.*filesystem paths.*prompt/i);
   });
+
+  test("rejects prompts that ask OpenCode to read Codex private runtime paths by default", async () => {
+    await expect(
+      opencodeRun({
+        opencodeBin: "/bin/echo",
+        cwd: process.cwd(),
+        background: false,
+        prompt: "Before reviewing, read /Users/domo/.codex/pua/skills/pua/SKILL.md and follow it."
+      })
+    ).rejects.toThrow(/Codex private runtime paths/i);
+  });
+
+  test("allows Codex private runtime paths only when broader OpenCode permissions are explicit", async () => {
+    const result = parseToolResult(
+      await opencodeRun({
+        opencodeBin: "/bin/echo",
+        cwd: process.cwd(),
+        background: false,
+        dangerouslySkipPermissions: true,
+        prompt: "Read ~/.codex/pua/skills/pua/SKILL.md only because broader OpenCode access was explicitly granted."
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.stdout).toContain("--dangerously-skip-permissions");
+  });
 });

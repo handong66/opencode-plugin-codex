@@ -34,6 +34,10 @@ The MCP tool registry is defined in `plugins/opencode-plugin-codex/src/server.ts
 
 For `opencode_run`, put the task instructions in `prompt`. Use `files` only for existing filesystem paths to attach; the server rejects prompt-like text in `files` before OpenCode can treat it as a missing path, and sends the prompt before `--file` arguments so OpenCode does not parse the prompt as another attachment.
 
+Do not ask OpenCode to read Codex private runtime paths such as `~/.codex`, `$CODEX_HOME`, or `.codex/plugins/cache` unless broader OpenCode filesystem access was explicitly requested. The plugin rejects those prompts by default because OpenCode's sandbox normally cannot read Codex's private runtime files; inline collaboration/PUA expectations in the prompt instead, or point to verified OpenCode-native skill files under `~/.config/opencode/skills`.
+
+For document review workflows, avoid attaching binary files such as `.docx` directly unless OpenCode can read that format. Prefer repository scripts, unpacked text, or explicit text extracts as review inputs.
+
 ## Requirements
 
 - Node.js `>=22`

@@ -53,7 +53,11 @@ server.registerTool(
     description: "Start an OpenCode task from Codex.",
     inputSchema: {
       ...commonShape,
-      prompt: z.string().describe("Task instructions or message to send to OpenCode. Put long prompts and task text here, not in files."),
+      prompt: z
+        .string()
+        .describe(
+          "Task instructions or message to send to OpenCode. Put long prompts and task text here, not in files. Do not ask OpenCode to read Codex private runtime paths such as ~/.codex; inline collaboration instructions instead."
+        ),
       agent: z.string().optional(),
       files: z
         .array(z.string().describe("Existing filesystem path to attach. Do not put prompt text, task descriptions, or file contents here."))

@@ -73,6 +73,19 @@ async function validateFileAttachments(files: string[] | undefined, cwd: string)
   }
 }
 
+function validatePromptBoundary(prompt: string, dangerouslySkipPermissions?: boolean): void {
+  if (dangerouslySkipPermissions) return;
+
+  const codexPrivatePathPattern = /(?:^|[\s"'`(])(?:~|\$HOME|\/[^\s"'`)]+)\/\.codex(?:\/|\b)/;
+  if (codexPrivatePathPattern.test(prompt)) {
+    throw new Error(
+      "Prompt asks OpenCode to read Codex private runtime paths such as ~/.codex. " +
+        "Inline the collaboration instructions in prompt, or use OpenCode-native skill paths under ~/.config/opencode/skills. " +
+        "Set dangerouslySkipPermissions only when the user explicitly asks to grant broader OpenCode filesystem access."
+    );
+  }
+}
+
 async function runOrStartJob(params: {
   kind: "run" | "continue" | "rescue" | "review" | "adversarial_review" | "transfer";
   prompt: string;
@@ -89,6 +102,7 @@ async function runOrStartJob(params: {
   dangerouslySkipPermissions?: boolean;
 }) {
   const cwd = cwdOrDefault(params.cwd);
+  validatePromptBoundary(params.prompt, params.dangerouslySkipPermissions);
   await validateFileAttachments(params.files, cwd);
   const args = buildRunArgs({ ...params, cwd });
   if (params.background ?? true) {

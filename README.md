@@ -82,7 +82,7 @@ Optional: register selected Codex collaboration skills for OpenCode to read from
 npm run register:opencode-skills
 ```
 
-The registration script is conservative: it skips existing conflicting skill targets instead of overwriting them, and it does not symlink Superpowers by default because OpenCode may already load Superpowers from its package cache. Set `OPENCODE_REGISTER_SUPERPOWERS=1` only when OpenCode is not already loading those skills.
+The registration script is conservative: it skips existing conflicting skill targets instead of overwriting them, does not symlink Superpowers by default because OpenCode may already load Superpowers from its package cache, and does not register Codex security-scan skills by default because they can escalate ordinary reviews. Set `OPENCODE_REGISTER_SUPERPOWERS=1` only when OpenCode is not already loading those skills. Set `OPENCODE_REGISTER_SECURITY_SKILLS=1` only for explicitly scoped OpenCode security-scan workflows.
 
 ## Development
 
@@ -105,13 +105,15 @@ Live OpenCode transfer verification depends on local provider/model access:
 
 ```bash
 OPENCODE_BIN="$HOME/.opencode/bin/opencode" \
-OPENCODE_MODEL="aihubmix/gemini-3-flash-preview" \
+OPENCODE_MODEL="provider/model-authorized-for-this-user" \
 npm run smoke:live-transfer
 ```
 
 ## Privacy Boundary
 
 `opencode_transfer` imports visible user/assistant transcript text into OpenCode's local session database. By default it does not include Codex system messages, developer messages, tool outputs, or reasoning.
+
+`opencode_transfer` requires an explicit authorized `model` in provider/model form. Model access is user-specific, so the plugin does not choose a default provider/model for transfer imports or continuations.
 
 ## Documentation Governance
 

@@ -47,7 +47,7 @@
 | OpenCode 可执行文件 | `~/.opencode/bin/opencode` |
 | OpenCode CLI PATH 状态 | 当前非交互 shell 中 `opencode` 未进入 `PATH` |
 | OpenCode provider | 已配置 `AIHubMix api` |
-| 本机可用模型验证 | `aihubmix/gemini-3-flash-preview` 成功 |
+| 本机可用模型验证 | `provider/model-authorized-for-this-user` 成功 |
 | 本机不可用模型验证 | `deepseek-v4-pro`、`deep-deepseek-v4-pro`、`coding-glm-5.1-free` 因 provider 授权失败 |
 
 验证过的 OpenCode CLI 命令：
@@ -617,7 +617,7 @@ opencode run --session <session-id> --model <provider/model> --format json --dir
 - 转换为 OpenCode session JSON。
 - 执行 `opencode import` 成功。
 - 执行 `opencode export <session> --sanitize` 成功 round-trip。
-- 执行 `opencode run --session <session> --model aihubmix/gemini-3-flash-preview --format json` 成功返回预期文本。
+- 执行 `opencode run --session <session> --model provider/model-authorized-for-this-user --format json` 成功返回预期文本。
 
 这证明 OpenCode 端具备等价导入能力，Codex 端也存在可用 transcript 来源。剩余工作是把一次性验证脚本产品化为插件内部模块。
 
@@ -965,7 +965,7 @@ live 测试必须显式开启：
 ```bash
 OPENCODE_LIVE=1 \
 OPENCODE_BIN="$HOME/.opencode/bin/opencode" \
-OPENCODE_MODEL="aihubmix/gemini-3-flash-preview" \
+OPENCODE_MODEL="provider/model-authorized-for-this-user" \
 npm run test:integration
 ```
 

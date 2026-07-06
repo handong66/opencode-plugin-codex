@@ -290,12 +290,23 @@ export async function opencodeTransfer(args: CommonArgs & {
     });
   }
 
-  const model = args.model ?? "aihubmix/gemini-3-flash-preview";
+  if (!args.model) {
+    return jsonText({
+      ok: false,
+      error: {
+        code: "opencode_model_required",
+        message:
+          "opencode_transfer requires an explicit authorized model. " +
+          "The plugin does not choose a provider/model default because model access is user-specific."
+      }
+    });
+  }
+
   const session = toOpenCodeSession(transcript, {
     idSuffix: `${Date.now()}`,
     cwd,
     title: args.title ?? "Codex transferred session",
-    model,
+    model: args.model,
     opencodeVersion: discovered.version
   });
 
@@ -335,7 +346,7 @@ export async function opencodeTransfer(args: CommonArgs & {
       kind: "transfer",
       prompt: continuePrompt,
       cwd,
-      model,
+      model: args.model,
       sessionId: opencodeSessionId,
       background: args.background ?? true,
       opencodeBin: discovered.bin
@@ -346,7 +357,7 @@ export async function opencodeTransfer(args: CommonArgs & {
       importedMessages: transcript.length,
       source: "codex-jsonl",
       rolloutFile,
-      model: splitModel(model),
+      model: splitModel(args.model),
       warnings,
       continuation: JSON.parse(runResult.content[0].text)
     });
@@ -358,7 +369,7 @@ export async function opencodeTransfer(args: CommonArgs & {
     importedMessages: transcript.length,
     source: "codex-jsonl",
     rolloutFile,
-    model: splitModel(model),
+    model: splitModel(args.model),
     warnings
   });
 }

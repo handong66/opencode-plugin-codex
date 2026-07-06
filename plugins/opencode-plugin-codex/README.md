@@ -56,3 +56,5 @@ The MCP server discovers OpenCode in this order:
 ## Transfer Privacy
 
 `opencode_transfer` imports visible user/assistant transcript text into OpenCode's local session database. It does not include Codex developer/system messages, tool outputs, or reasoning by default.
+
+Pass an explicit authorized `model` to `opencode_transfer`; the plugin does not choose a provider/model default because model access is user-specific.

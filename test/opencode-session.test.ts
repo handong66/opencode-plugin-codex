@@ -12,15 +12,15 @@ describe("toOpenCodeSession", () => {
         idSuffix: "test",
         cwd: "/repo",
         title: "Codex transfer test",
-        model: "aihubmix/gemini-3-flash-preview",
+        model: "example/example-model",
         now: 1782589587543
       }
     );
 
     expect(session.info.id).toBe("ses_codex_transfer_test");
     expect(session.info.model).toEqual({
-      providerID: "aihubmix",
-      id: "gemini-3-flash-preview",
+      providerID: "example",
+      id: "example-model",
       variant: "default"
     });
     expect(session.messages).toHaveLength(2);
@@ -40,7 +40,7 @@ describe("toOpenCodeSession", () => {
       {
         idSuffix: "assistant_first",
         cwd: "/repo",
-        model: "aihubmix/gemini-3-flash-preview",
+        model: "example/example-model",
         now: 1782589587543
       }
     );

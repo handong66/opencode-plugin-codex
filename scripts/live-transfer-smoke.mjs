@@ -5,8 +5,12 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
 const opencodeBin = process.env.OPENCODE_BIN || join(homedir(), ".opencode", "bin", "opencode");
-const model = process.env.OPENCODE_MODEL || "aihubmix/gemini-3-flash-preview";
+const model = process.env.OPENCODE_MODEL;
 const sentinel = "OPENCODE_PLUGIN_CODEX_LIVE_TRANSFER_OK";
+
+if (!model) {
+  throw new Error("Set OPENCODE_MODEL to an authorized OpenCode model in provider/model form before running the live transfer smoke.");
+}
 
 const transport = new StdioClientTransport({
   command: "node",

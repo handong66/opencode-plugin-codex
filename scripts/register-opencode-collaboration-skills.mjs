@@ -17,6 +17,7 @@ const configSkillsDir = join(home, ".config", "opencode", "skills");
 const openCodePackageCacheRoot = join(home, ".cache", "opencode", "packages");
 const codexHome = join(home, ".codex");
 const includeSuperpowers = process.env.OPENCODE_REGISTER_SUPERPOWERS === "1";
+const includeSecurity = process.env.OPENCODE_REGISTER_SECURITY_SKILLS === "1";
 const strict = process.env.OPENCODE_REGISTER_STRICT === "1";
 
 const directCodexSkillDirs = [
@@ -29,36 +30,24 @@ const directCodexSkillDirs = [
     dir: join(codexHome, "pua/skills/pua"),
   },
   {
-    group: "security",
-    dir: join(
-      codexHome,
-      "plugins/cache/openai-curated-remote/codex-security/0.1.10/skills/security-diff-scan",
-    ),
-  },
-  {
-    group: "security",
-    dir: join(codexHome, "plugins/cache/openai-curated-remote/codex-security/0.1.10/skills/threat-model"),
-  },
-  {
-    group: "security",
-    dir: join(codexHome, "plugins/cache/openai-curated-remote/codex-security/0.1.10/skills/validation"),
-  },
-  {
     group: "frontend",
     dir: join(codexHome, "skills/playwright"),
   },
 ];
 
-const discoverableCodexSkills = [
-  { group: "security", name: "security-diff-scan" },
-  { group: "security", name: "threat-model" },
-  { group: "security", name: "validation" },
+const defaultDiscoverableCodexSkills = [
   { group: "frontend", name: "frontend-testing-debugging" },
   { group: "web-best-practices", name: "react-best-practices" },
   { group: "web-best-practices", name: "supabase-postgres-best-practices" },
   { group: "documents", name: "documents" },
   { group: "documents", name: "pdf" },
   { group: "documents", name: "Spreadsheets" },
+];
+
+const securityCodexSkills = [
+  { group: "security", name: "security-diff-scan" },
+  { group: "security", name: "threat-model" },
+  { group: "security", name: "validation" },
 ];
 
 function findSuperpowersSkillsDir() {
@@ -136,7 +125,11 @@ function findCodexSkillDirByName(name) {
 }
 
 function collectCodexSkillDirs() {
-  const discovered = discoverableCodexSkills.map((skill) => ({
+  const discoverable = [
+    ...defaultDiscoverableCodexSkills,
+    ...(includeSecurity ? securityCodexSkills : []),
+  ];
+  const discovered = discoverable.map((skill) => ({
     group: skill.group,
     dir: findCodexSkillDirByName(skill.name) ?? join(codexHome, "missing", skill.name),
   }));
@@ -244,6 +237,9 @@ console.log(
       already,
       missing,
       skippedConflicts: conflicts,
+      skippedSecurity: includeSecurity
+        ? false
+        : "default; set OPENCODE_REGISTER_SECURITY_SKILLS=1 only for explicit OpenCode security-scan workflows",
       skippedSuperpowers: includeSuperpowers
         ? false
         : "default; set OPENCODE_REGISTER_SUPERPOWERS=1 only if OpenCode is not already loading Superpowers"

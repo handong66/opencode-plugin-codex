@@ -29,7 +29,7 @@ const server = new McpServer(
 const commonShape = {
   cwd: z.string().optional().describe("Working directory for OpenCode. Defaults to the MCP server cwd."),
   opencodeBin: z.string().optional().describe("Explicit OpenCode binary path. Defaults to OPENCODE_BIN, ~/.opencode/bin/opencode, Homebrew paths, then PATH."),
-  model: z.string().optional().describe("OpenCode model in provider/model form, for example aihubmix/gemini-3-flash-preview.")
+  model: z.string().optional().describe("OpenCode model in provider/model form. Pass an actually authorized model from the user's OpenCode provider config.")
 };
 
 server.registerTool(
@@ -138,6 +138,7 @@ server.registerTool(
     description: "Convert a Codex rollout transcript into an OpenCode session and import it.",
     inputSchema: {
       ...commonShape,
+      model: z.string().describe("Explicit authorized OpenCode model in provider/model form. Required because transfer import metadata cannot safely infer user-specific model access."),
       threadId: z.string().optional(),
       rolloutFile: z.string().optional(),
       title: z.string().optional(),

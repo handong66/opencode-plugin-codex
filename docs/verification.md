@@ -64,7 +64,7 @@ Command:
 
 ```bash
 OPENCODE_BIN="$HOME/.opencode/bin/opencode" \
-OPENCODE_MODEL=aihubmix/gemini-3-flash-preview \
+OPENCODE_MODEL=provider/model-authorized-for-this-user \
 npm run smoke:live-transfer
 ```
 
@@ -75,7 +75,7 @@ Latest result:
   "ok": true,
   "opencodeSessionId": "ses_codex_transfer_1782591198127",
   "importedMessages": 8,
-  "model": "aihubmix/gemini-3-flash-preview",
+  "model": "provider/model-authorized-for-this-user",
   "sentinel": "OPENCODE_PLUGIN_CODEX_LIVE_TRANSFER_OK"
 }
 ```

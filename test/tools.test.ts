@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { opencodeRun } from "../plugins/opencode-plugin-codex/src/tools.js";
+import { opencodeAdversarialReview, opencodeRun } from "../plugins/opencode-plugin-codex/src/tools.js";
 
 function parseToolResult(result: Awaited<ReturnType<typeof opencodeRun>>) {
   return JSON.parse(result.content[0].text) as {
@@ -88,5 +88,24 @@ describe("opencodeRun", () => {
 
     expect(result.ok).toBe(true);
     expect(result.stdout).toContain("--dangerously-skip-permissions");
+  });
+});
+
+describe("opencodeAdversarialReview", () => {
+  test("keeps security/path boundary reviews bounded and prevents security scan escalation", async () => {
+    const result = parseToolResult(
+      await opencodeAdversarialReview({
+        opencodeBin: "/bin/echo",
+        cwd: process.cwd(),
+        background: false,
+        target: "security/path boundary changes in plugins/opencode-plugin-codex/src/tools.ts"
+      })
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.stdout).toContain("bounded failure-mode review");
+    expect(result.stdout).toContain("Do not invoke security scan skills");
+    expect(result.stdout).toContain("security-diff-scan");
+    expect(result.stdout).toContain("Do not spawn subagents");
   });
 });

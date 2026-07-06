@@ -71,7 +71,7 @@ npm run build
 Add this repository as a Codex plugin marketplace if it is not already configured:
 
 ```bash
-codex plugin marketplace add /Users/domo/Downloads/opencode-plugin-codex
+codex plugin marketplace add /path/to/opencode-plugin-codex
 ```
 
 Then install `opencode-plugin-codex` from that marketplace in Codex.

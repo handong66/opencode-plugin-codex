@@ -118,7 +118,7 @@ describe("opencodeRun", () => {
         opencodeBin: "/bin/echo",
         cwd: process.cwd(),
         background: false,
-        prompt: "Before reviewing, read /Users/domo/.codex/pua/skills/pua/SKILL.md and follow it."
+        prompt: "Before reviewing, read /Users/example/.codex/pua/skills/pua/SKILL.md and follow it."
       })
     ).rejects.toThrow(/Codex private runtime paths/i);
   });

@@ -1009,9 +1009,9 @@ ses_codex_jsonl_transfer_1782589587543
 已知临时 JSON：
 
 ```text
-/private/tmp/opencode-codex-transfer-import-smoke-1782589193602.json
-/private/tmp/opencode-codex-jsonl-transfer-probe-1782589562042.json
-/private/tmp/opencode-codex-jsonl-transfer-probe-1782589587543.json
+<temp-dir>/opencode-codex-transfer-import-smoke-1782589193602.json
+<temp-dir>/opencode-codex-jsonl-transfer-probe-1782589562042.json
+<temp-dir>/opencode-codex-jsonl-transfer-probe-1782589587543.json
 ```
 
 后续如果要清理，需要先确认 OpenCode 是否提供安全删除 session 的 CLI 或 DB 工具；不能直接手工改数据库作为默认方案。

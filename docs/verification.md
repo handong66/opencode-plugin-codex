@@ -10,7 +10,7 @@ Commands:
 npm run check
 npm run register:opencode-skills
 git diff --check
-git -C /Users/domo/Downloads/Dong-skills diff --check
+git -C /path/to/Dong-skills diff --check
 ```
 
 Results:
@@ -18,7 +18,7 @@ Results:
 - `npm run check`: build, all Vitest tests, plugin validation, and MCP smoke passed.
 - `npm run register:opencode-skills`: completed successfully; existing conflicting OpenCode skill targets were reported and skipped without overwriting, and Superpowers registration was skipped by default.
 - `git diff --check`: no whitespace errors in this repository.
-- `git -C /Users/domo/Downloads/Dong-skills diff --check`: no whitespace errors in the collaboration skill source repository.
+- `git -C /path/to/Dong-skills diff --check`: no whitespace errors in the collaboration skill source repository.
 
 Coverage added:
 
@@ -30,7 +30,7 @@ Coverage added:
 ```bash
 npm audit --json
 npm run check
-/private/tmp/opencode-plugin-codex-validator-venv/bin/python /Users/domo/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py plugins/opencode-plugin-codex
+/path/to/plugin-validator-venv/bin/python "$HOME/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py" plugins/opencode-plugin-codex
 git diff --check
 ```
 
@@ -63,7 +63,7 @@ It also calls `opencode_check` when a local OpenCode binary is discoverable.
 Command:
 
 ```bash
-OPENCODE_BIN=/Users/domo/.opencode/bin/opencode \
+OPENCODE_BIN="$HOME/.opencode/bin/opencode" \
 OPENCODE_MODEL=aihubmix/gemini-3-flash-preview \
 npm run smoke:live-transfer
 ```
@@ -93,12 +93,12 @@ This verifies the bundled MCP server can:
 The repository marketplace was accepted by the local Codex CLI:
 
 ```bash
-codex plugin marketplace add /Users/domo/Downloads/opencode-plugin-codex
+codex plugin marketplace add /path/to/opencode-plugin-codex
 ```
 
 Result:
 
 ```text
-Added marketplace `opencode-plugin-codex` from /Users/domo/Downloads/opencode-plugin-codex.
-Installed marketplace root: /Users/domo/Downloads/opencode-plugin-codex
+Added marketplace `opencode-plugin-codex` from /path/to/opencode-plugin-codex.
+Installed marketplace root: /path/to/opencode-plugin-codex
 ```

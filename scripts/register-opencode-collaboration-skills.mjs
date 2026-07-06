@@ -19,7 +19,7 @@ const codexHome = join(home, ".codex");
 const includeSuperpowers = process.env.OPENCODE_REGISTER_SUPERPOWERS === "1";
 const strict = process.env.OPENCODE_REGISTER_STRICT === "1";
 
-const codexSkillDirs = [
+const directCodexSkillDirs = [
   {
     group: "collaboration",
     dir: join(codexHome, "skills/codex-opencode-collaboration"),
@@ -47,30 +47,18 @@ const codexSkillDirs = [
     group: "frontend",
     dir: join(codexHome, "skills/playwright"),
   },
-  {
-    group: "frontend",
-    dir: join(codexHome, "plugins/cache/openai-curated/build-web-apps/d6169bef/skills/frontend-testing-debugging"),
-  },
-  {
-    group: "web-best-practices",
-    dir: join(codexHome, "plugins/cache/openai-curated/build-web-apps/d6169bef/skills/react-best-practices"),
-  },
-  {
-    group: "web-best-practices",
-    dir: join(codexHome, "plugins/cache/openai-curated/build-web-apps/d6169bef/skills/supabase-best-practices"),
-  },
-  {
-    group: "documents",
-    dir: join(codexHome, "plugins/cache/openai-primary-runtime/documents/26.630.12135/skills/documents"),
-  },
-  {
-    group: "documents",
-    dir: join(codexHome, "plugins/cache/openai-primary-runtime/pdf/26.630.12135/skills/pdf"),
-  },
-  {
-    group: "documents",
-    dir: join(codexHome, "plugins/cache/openai-primary-runtime/spreadsheets/26.630.12135/skills/spreadsheets"),
-  },
+];
+
+const discoverableCodexSkills = [
+  { group: "security", name: "security-diff-scan" },
+  { group: "security", name: "threat-model" },
+  { group: "security", name: "validation" },
+  { group: "frontend", name: "frontend-testing-debugging" },
+  { group: "web-best-practices", name: "react-best-practices" },
+  { group: "web-best-practices", name: "supabase-postgres-best-practices" },
+  { group: "documents", name: "documents" },
+  { group: "documents", name: "pdf" },
+  { group: "documents", name: "Spreadsheets" },
 ];
 
 function findSuperpowersSkillsDir() {
@@ -102,6 +90,57 @@ function readSkillName(skillMd) {
   if (!match) return null;
   const nameLine = match[1].split(/\r?\n/).find((line) => line.startsWith("name:"));
   return nameLine?.slice("name:".length).trim().replace(/^["']|["']$/g, "") || null;
+}
+
+function skillSearchRoots() {
+  return [
+    join(codexHome, "skills"),
+    join(codexHome, "pua", "skills"),
+    join(codexHome, "plugins", "cache"),
+  ];
+}
+
+function findCodexSkillDirByName(name) {
+  const matches = [];
+  const roots = skillSearchRoots().filter((root) => existsSync(root));
+  const rootDepths = new Map(roots.map((root) => [root, root.split("/").length]));
+  const stack = [...roots];
+
+  while (stack.length) {
+    const current = stack.pop();
+    let entries;
+    try {
+      entries = readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    const skillMd = join(current, "SKILL.md");
+    if (existsSync(skillMd) && readSkillName(skillMd) === name) {
+      matches.push(current);
+      continue;
+    }
+
+    const currentRoot = roots.find((root) => current === root || current.startsWith(`${root}/`));
+    const maxDepth = currentRoot ? rootDepths.get(currentRoot) + 8 : undefined;
+    if (maxDepth !== undefined && current.split("/").length >= maxDepth) continue;
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name === "node_modules" || entry.name === ".git") continue;
+      stack.push(join(current, entry.name));
+    }
+  }
+
+  return matches.sort().at(-1) ?? null;
+}
+
+function collectCodexSkillDirs() {
+  const discovered = discoverableCodexSkills.map((skill) => ({
+    group: skill.group,
+    dir: findCodexSkillDirByName(skill.name) ?? join(codexHome, "missing", skill.name),
+  }));
+  return [...directCodexSkillDirs, ...discovered];
 }
 
 function collectSuperpowersSkillDirs() {
@@ -152,7 +191,7 @@ function isSameTarget(linkPath, sourceDir) {
 
 mkdirSync(configSkillsDir, { recursive: true });
 
-const candidates = [...(includeSuperpowers ? collectSuperpowersSkillDirs() : []), ...codexSkillDirs];
+const candidates = [...(includeSuperpowers ? collectSuperpowersSkillDirs() : []), ...collectCodexSkillDirs()];
 const linked = [];
 const already = [];
 const conflicts = [];

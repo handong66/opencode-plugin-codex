@@ -16,6 +16,7 @@
     "test:watch": "vitest",
     "test:integration": "vitest run test/integration",
     "validate:plugin": "node scripts/validate-plugin.mjs",
+    "register:opencode-skills": "node scripts/register-opencode-collaboration-skills.mjs",
     "smoke:mcp": "node scripts/smoke-mcp.mjs",
     "smoke:live-transfer": "node scripts/live-transfer-smoke.mjs",
     "check": "npm run build && npm test && npm run validate:plugin && npm run smoke:mcp"

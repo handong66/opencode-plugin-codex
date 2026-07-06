@@ -34,7 +34,117 @@ export type JobRecord = {
   stderrPath: string;
 };
 
+export type JobOutputSummary = {
+  resultComplete: boolean;
+  state:
+    | "queued_partial"
+    | "running_partial"
+    | "cancelled_partial"
+    | "failed_partial"
+    | "succeeded_with_text"
+    | "succeeded_without_text";
+  eventCounts: Record<string, number>;
+  openCodeSessionId?: string;
+  lastEventType?: string;
+  lastTextPreview?: string;
+  sawToolUse: boolean;
+  sawSubagentTask: boolean;
+  guidance: string;
+};
+
 const running = new Map<string, ChildProcess>();
+
+function previewText(text: string): string {
+  const singleLine = text.replace(/\s+/g, " ").trim();
+  return singleLine.length > 500 ? `${singleLine.slice(0, 497)}...` : singleLine;
+}
+
+export function summarizeOpenCodeOutput(record: JobRecord, stdout: string, stderr: string): JobOutputSummary {
+  const eventCounts: Record<string, number> = {};
+  let openCodeSessionId: string | undefined;
+  let lastEventType: string | undefined;
+  let lastText = "";
+  let sawToolUse = false;
+  let sawSubagentTask = false;
+
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let event: unknown;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    if (!event || typeof event !== "object") continue;
+    const typedEvent = event as {
+      type?: string;
+      sessionID?: string;
+      part?: {
+        type?: string;
+        text?: string;
+        tool?: string;
+      };
+    };
+    const eventType = typedEvent.type ?? typedEvent.part?.type ?? "unknown";
+    eventCounts[eventType] = (eventCounts[eventType] ?? 0) + 1;
+    openCodeSessionId ??= typedEvent.sessionID;
+    lastEventType = eventType;
+
+    if (eventType === "tool_use" || typedEvent.part?.type === "tool") {
+      sawToolUse = true;
+      if (typedEvent.part?.tool === "task") sawSubagentTask = true;
+    }
+
+    if (eventType === "text" && typeof typedEvent.part?.text === "string" && typedEvent.part.text.trim()) {
+      lastText = typedEvent.part.text;
+    }
+  }
+
+  let state: JobOutputSummary["state"];
+  if (record.status === "succeeded") {
+    state = lastText.trim() ? "succeeded_with_text" : "succeeded_without_text";
+  } else if (record.status === "failed") {
+    state = "failed_partial";
+  } else if (record.status === "cancelled") {
+    state = "cancelled_partial";
+  } else if (record.status === "queued") {
+    state = "queued_partial";
+  } else {
+    state = "running_partial";
+  }
+
+  const resultComplete = state === "succeeded_with_text";
+  let guidance: string;
+  if (resultComplete) {
+    guidance = "OpenCode produced final text. Codex must still verify findings against the workspace before acting on them.";
+  } else if (record.status === "running" || record.status === "queued") {
+    guidance = "OpenCode is still running. Poll status/result later or cancel and rerun with a narrower target; do not treat current stdout as a final review.";
+  } else if (record.status === "cancelled") {
+    guidance = "OpenCode was cancelled. stdout/stderr are partial logs only; do not treat them as a final review or implementation result.";
+  } else if (record.status === "failed") {
+    guidance = stderr.trim()
+      ? "OpenCode failed. Inspect stderr and rerun with a narrower prompt or corrected environment."
+      : "OpenCode failed without stderr. Rerun with a narrower prompt and inspect the OpenCode session directly if needed.";
+  } else {
+    guidance = "OpenCode exited successfully but no final assistant text was observed. Rerun with a narrower target and an explicit findings-only output contract.";
+  }
+  if (!resultComplete && sawSubagentTask) {
+    guidance += " A subagent task call was observed, which often indicates the prompt widened beyond a bounded second-pass review.";
+  }
+
+  return {
+    resultComplete,
+    state,
+    eventCounts,
+    openCodeSessionId,
+    lastEventType,
+    lastTextPreview: lastText ? previewText(lastText) : undefined,
+    sawToolUse,
+    sawSubagentTask,
+    guidance
+  };
+}
 
 export class JobStore {
   constructor(private readonly rootDir: string) {}
@@ -145,14 +255,18 @@ export class JobStore {
     return record;
   }
 
-  async result(jobId: string, maxChars = 20_000): Promise<{ record: JobRecord; stdout: string; stderr: string }> {
+  async result(
+    jobId: string,
+    maxChars = 20_000
+  ): Promise<{ record: JobRecord; stdout: string; stderr: string; outputSummary: JobOutputSummary }> {
     const record = await this.read(jobId);
     const stdout = await readFile(record.stdoutPath, "utf8").catch(() => "");
     const stderr = await readFile(record.stderrPath, "utf8").catch(() => "");
     return {
       record,
       stdout: stdout.slice(-maxChars),
-      stderr: stderr.slice(-maxChars)
+      stderr: stderr.slice(-maxChars),
+      outputSummary: summarizeOpenCodeOutput(record, stdout, stderr)
     };
   }
 }

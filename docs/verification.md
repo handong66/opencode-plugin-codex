@@ -1,6 +1,29 @@
 # Verification
 
-Last verified on 2026-06-27.
+Last verified on 2026-07-06.
+
+## 2026-07-06 Background Result Regression
+
+Commands:
+
+```bash
+npm run check
+npm run register:opencode-skills
+git diff --check
+git -C /Users/domo/Downloads/Dong-skills diff --check
+```
+
+Results:
+
+- `npm run check`: build, all Vitest tests, plugin validation, and MCP smoke passed.
+- `npm run register:opencode-skills`: completed successfully; existing conflicting OpenCode skill targets were reported and skipped without overwriting, and Superpowers registration was skipped by default.
+- `git diff --check`: no whitespace errors in this repository.
+- `git -C /Users/domo/Downloads/Dong-skills diff --check`: no whitespace errors in the collaboration skill source repository.
+
+Coverage added:
+
+- `opencode_result` now returns `outputSummary`, including `resultComplete`, `state`, event counts, final text preview, and whether an OpenCode `task` subagent was observed.
+- Tests cover cancelled tool-only background logs as partial output and succeeded assistant text as complete output.
 
 ## Static and Local Checks
 

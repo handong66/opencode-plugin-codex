@@ -168,7 +168,7 @@ server.registerTool(
   "opencode_result",
   {
     title: "OpenCode Job Result",
-    description: "Read stdout/stderr tail for a background OpenCode job.",
+    description: "Read stdout/stderr tail and outputSummary for a background OpenCode job. Only outputSummary.resultComplete means OpenCode produced final text.",
     inputSchema: {
       cwd: z.string().optional(),
       jobId: z.string(),

@@ -1,12 +1,60 @@
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { opencodeAdversarialReview, opencodeRun } from "../plugins/opencode-plugin-codex/src/tools.js";
+import { opencodeAdversarialReview, opencodeResult, opencodeRun } from "../plugins/opencode-plugin-codex/src/tools.js";
 
-function parseToolResult(result: Awaited<ReturnType<typeof opencodeRun>>) {
+function parseToolResult(result: { content: Array<{ text: string }> }) {
   return JSON.parse(result.content[0].text) as {
     ok: boolean;
     exitCode?: number | null;
     stdout?: string;
+    outputSummary?: {
+      resultComplete: boolean;
+      state: string;
+      eventCounts: Record<string, number>;
+      sawSubagentTask: boolean;
+      guidance: string;
+    };
   };
+}
+
+async function withTempJob<T>(
+  record: Record<string, unknown>,
+  stdout: string,
+  stderr: string,
+  run: (params: { cwd: string; jobId: string }) => Promise<T>
+): Promise<T> {
+  const cwd = await mkdtemp(join(tmpdir(), "opencode-plugin-codex-test-"));
+  try {
+    const jobsDir = join(cwd, ".opencode-plugin-codex", "jobs");
+    await mkdir(jobsDir, { recursive: true });
+    const jobId = String(record.id);
+    const stdoutPath = join(jobsDir, `${jobId}.stdout.log`);
+    const stderrPath = join(jobsDir, `${jobId}.stderr.log`);
+    await writeFile(stdoutPath, stdout);
+    await writeFile(stderrPath, stderr);
+    await writeFile(
+      join(jobsDir, `${jobId}.json`),
+      `${JSON.stringify(
+        {
+          kind: "review",
+          cwd,
+          command: "opencode",
+          args: [],
+          createdAt: "2026-07-06T00:00:00.000Z",
+          stdoutPath,
+          stderrPath,
+          ...record
+        },
+        null,
+        2
+      )}\n`
+    );
+    return await run({ cwd, jobId });
+  } finally {
+    await rm(cwd, { recursive: true, force: true });
+  }
 }
 
 describe("opencodeRun", () => {
@@ -108,5 +156,62 @@ describe("opencodeAdversarialReview", () => {
     expect(result.stdout).toContain("security-diff-scan");
     expect(result.stdout).toContain("Do not spawn subagents for this bounded review");
     expect(result.stdout).toContain("separate explicitly scoped OpenCode task");
+  });
+});
+
+describe("opencodeResult", () => {
+  test("marks cancelled tool-only background logs as partial, not final output", async () => {
+    const jobId = "job_cancelled_partial";
+    const stdout = [
+      JSON.stringify({ type: "step_start", sessionID: "ses_partial" }),
+      JSON.stringify({
+        type: "tool_use",
+        sessionID: "ses_partial",
+        part: { type: "tool", tool: "read" }
+      }),
+      JSON.stringify({
+        type: "tool_use",
+        sessionID: "ses_partial",
+        part: { type: "tool", tool: "task" }
+      }),
+      JSON.stringify({ type: "step_finish", sessionID: "ses_partial" })
+    ].join("\n");
+
+    const result = parseToolResult(
+      await withTempJob({ id: jobId, status: "cancelled" }, stdout, "", ({ cwd }) =>
+        opencodeResult({ cwd, jobId })
+      )
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.outputSummary?.resultComplete).toBe(false);
+    expect(result.outputSummary?.state).toBe("cancelled_partial");
+    expect(result.outputSummary?.eventCounts.tool_use).toBe(2);
+    expect(result.outputSummary?.sawSubagentTask).toBe(true);
+    expect(result.outputSummary?.guidance).toMatch(/partial logs only/i);
+  });
+
+  test("marks succeeded OpenCode jobs with assistant text as complete", async () => {
+    const jobId = "job_succeeded_text";
+    const stdout = [
+      JSON.stringify({ type: "step_start", sessionID: "ses_complete" }),
+      JSON.stringify({
+        type: "text",
+        sessionID: "ses_complete",
+        part: { type: "text", text: "Findings: no blocking issues." }
+      }),
+      JSON.stringify({ type: "step_finish", sessionID: "ses_complete" })
+    ].join("\n");
+
+    const result = parseToolResult(
+      await withTempJob({ id: jobId, status: "succeeded" }, stdout, "", ({ cwd }) =>
+        opencodeResult({ cwd, jobId })
+      )
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.outputSummary?.resultComplete).toBe(true);
+    expect(result.outputSummary?.state).toBe("succeeded_with_text");
+    expect(result.outputSummary?.guidance).toMatch(/Codex must still verify/i);
   });
 });

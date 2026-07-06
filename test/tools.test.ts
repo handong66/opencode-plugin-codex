@@ -106,6 +106,7 @@ describe("opencodeAdversarialReview", () => {
     expect(result.stdout).toContain("bounded failure-mode review");
     expect(result.stdout).toContain("Do not invoke security scan skills");
     expect(result.stdout).toContain("security-diff-scan");
-    expect(result.stdout).toContain("Do not spawn subagents");
+    expect(result.stdout).toContain("Do not spawn subagents for this bounded review");
+    expect(result.stdout).toContain("separate explicitly scoped OpenCode task");
   });
 });

@@ -37,7 +37,7 @@ The current tool registry lives in `src/server.ts` and is smoke-tested by `../..
 
 For `opencode_run`, put task instructions in `prompt`; `files` is only for existing filesystem paths to attach. The plugin sends the prompt before `--file` arguments so OpenCode does not parse prompt text as another attachment.
 
-Use `opencode_review` and `opencode_adversarial_review` for bounded second-pass review by default. Do not ask OpenCode to invoke security scan skills, validation skills, or subagents unless the user explicitly requests a security audit.
+Use `opencode_review` and `opencode_adversarial_review` for bounded second-pass review by default. Do not ask OpenCode to invoke security scan skills, validation skills, or subagents for the bounded review. If parallel or full security-audit work is needed, start a separate explicitly scoped OpenCode task with explicit user approval.
 
 ## Local OpenCode Discovery
 

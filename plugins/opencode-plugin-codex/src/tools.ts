@@ -215,7 +215,8 @@ export async function opencodeReview(args: CommonArgs & {
   const prompt = [
     "You are OpenCode acting as a bounded second reviewer for Codex.",
     `Review ${target}.`,
-    "This is not a full security scan. Do not invoke security scan skills or subagents unless the prompt explicitly asks for a full security audit.",
+    "This is not a full security scan. Do not invoke security scan skills for this bounded review.",
+    "Do not spawn subagents for this bounded review. If parallel or full security-audit work is truly required, stop and say that a separate explicitly scoped OpenCode task is needed.",
     "Inspect only the named target and directly relevant files; if the scope is too broad, ask for a narrower target instead of expanding.",
     "Prioritize correctness bugs, regressions, risk-sensitive failure modes, and missing tests.",
     "Return Findings first, then Open questions, then Test gaps. Keep it concise. Stay read-only."
@@ -232,7 +233,8 @@ export async function opencodeAdversarialReview(args: CommonArgs & {
     "You are OpenCode acting as a bounded failure-mode reviewer for Codex.",
     `Target: ${target}.`,
     "This is not a full security scan. Do not invoke security scan skills, including security-diff-scan, threat-model, attack-path-analysis, or validation.",
-    "Do not spawn subagents. Do not perform repo-wide discovery unless the target is explicitly repo-wide.",
+    "Do not spawn subagents for this bounded review. If parallel or full security-audit work is truly required, stop and say that a separate explicitly scoped OpenCode task is needed.",
+    "Do not perform repo-wide discovery unless the target is explicitly repo-wide.",
     "Inspect only the named target and directly relevant files; if more scope is needed, say what is missing instead of expanding.",
     "Find hidden breakage paths, bad assumptions, permission/path/platform issues, and failure modes.",
     "Return at most 5 findings, then Highest-risk assumption, Recommended verification, and Scope not inspected. Stay read-only."

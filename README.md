@@ -38,7 +38,7 @@ Do not ask OpenCode to read Codex private runtime paths such as `~/.codex`, `$CO
 
 For document review workflows, avoid attaching binary files such as `.docx` directly unless OpenCode can read that format. Prefer repository scripts, unpacked text, or explicit text extracts as review inputs.
 
-Use `opencode_review` and `opencode_adversarial_review` as bounded second-pass reviews. They are not full security scans by default; prompts should name exact files or diffs and should not ask OpenCode to invoke `security-diff-scan`, threat modeling, attack-path analysis, validation skills, or subagents unless the user explicitly requests a security audit.
+Use `opencode_review` and `opencode_adversarial_review` as bounded second-pass reviews. They are not full security scans by default; prompts should name exact files or diffs and should not ask OpenCode to invoke `security-diff-scan`, threat modeling, attack-path analysis, validation skills, or subagents for the bounded review. If parallel or full security-audit work is needed, start a separate explicitly scoped OpenCode task with explicit user approval.
 
 ## Requirements
 

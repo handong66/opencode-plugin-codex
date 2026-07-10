@@ -1,104 +1,56 @@
 # Verification
 
-Last verified on 2026-07-06.
+Last verified on 2026-07-10 against OpenCode CLI 1.17.15.
 
-## 2026-07-06 Background Result Regression
-
-Commands:
-
-```bash
-npm run check
-npm run register:opencode-skills
-git diff --check
-git -C /path/to/Dong-skills diff --check
-```
-
-Results:
-
-- `npm run check`: build, all Vitest tests, plugin validation, and MCP smoke passed.
-- `npm run register:opencode-skills`: completed successfully; existing conflicting OpenCode skill targets were reported and skipped without overwriting, and Superpowers registration was skipped by default.
-- `git diff --check`: no whitespace errors in this repository.
-- `git -C /path/to/Dong-skills diff --check`: no whitespace errors in the collaboration skill source repository.
-
-Coverage added:
-
-- `opencode_result` now returns `outputSummary`, including `resultComplete`, `state`, event counts, final text preview, and whether an OpenCode `task` subagent was observed.
-- Tests cover cancelled tool-only background logs as partial output and succeeded assistant text as complete output.
-
-## Static and Local Checks
+## Release matrix
 
 ```bash
 npm audit --json
 npm run check
-/path/to/plugin-validator-venv/bin/python "$HOME/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py" plugins/opencode-plugin-codex
+npm run test:integration
+npm run smoke:opencode-cli
+npm run smoke:background
+python3 "$HOME/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py" plugins/opencode-plugin-codex
+python3 "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" plugins/opencode-plugin-codex/skills/opencode
 git diff --check
 ```
 
 Results:
 
-- `npm audit --json`: 0 vulnerabilities.
-- `npm run check`: build, unit tests, plugin validation, and MCP smoke passed.
-- Official plugin-creator validator passed.
-- `git diff --check`: no whitespace errors.
+- Dependency audit: 0 vulnerabilities.
+- Unit suite: 8 files and 43 tests passed.
+- Cross-MCP background lifecycle and installed-cache workspace-root integration: 4 tests passed.
+- Repository validator and current official plugin-creator validator passed.
+- MCP smoke listed all 10 tools and verified the current schemas: no public `opencodeBin`, separate permission/private-path flags, and job lifecycle tools keyed only by `jobId`.
+- OpenCode CLI smoke passed `--version`, `--help`, and the `run`, `providers`, `models`, and `import` help probes.
+- Built-in, Dong-skills source, and installed collaboration Skills passed the current quick validator.
+- Both repositories passed `git diff --check`.
 
-## MCP Smoke
+## TDD evidence
 
-`npm run smoke:mcp` starts `plugins/opencode-plugin-codex/dist/server.js` through the MCP TypeScript SDK client and verifies all 10 tools are listed:
+The regression suite was observed RED before each behavior fix. Reproduced failures included job-ID traversal, hidden transfer text, prompt text in argv, workspace/file escapes, caller-controlled executables, ignored background timeout, leaked `CODEX_*` variables, incomplete JSONL treated as final, exit-zero JSONL errors, unverified imports, continuation partial-success loss, unbounded output, stale workers, missing live partial logs, stdin delivery loss, cancellation overwritten by a stale worker write, an installed MCP process mistaking its plugin-cache cwd for the Codex project root, current Codex returning an empty standard roots list despite carrying per-call workspace metadata, and stale standard roots after a same-connection workspace change. Each targeted test passed after the minimal implementation, then the full matrix passed.
 
-- `opencode_check`
-- `opencode_run`
-- `opencode_continue`
-- `opencode_rescue`
-- `opencode_review`
-- `opencode_adversarial_review`
-- `opencode_transfer`
-- `opencode_status`
-- `opencode_result`
-- `opencode_cancel`
+## Runtime smoke
 
-It also calls `opencode_check` when a local OpenCode binary is discoverable.
+The current authorized model was exercised only with harmless sentinel prompts:
 
-## Live OpenCode Transfer Smoke
+- Real background job `job_1783678207215_ec02730d` reached `succeeded_with_text` and returned `OPENCODE_PLUGIN_CODEX_REAL_BACKGROUND_OK`.
+- Final installed-cache job `job_1783679105030_b146cc2a` reached `succeeded_with_text`, returned `OPENCODE_PLUGIN_CODEX_FINAL_CACHE_BACKGROUND_OK`, and had `outputSummary.resultComplete=true`.
+- Live transfer imported two synthetic visible user/assistant messages into session `ses_codex_transfer_1783678212540`, continued it successfully, and returned `OPENCODE_PLUGIN_CODEX_LIVE_TRANSFER_OK`.
+- Export readback confirmed the visible messages were present and the injected hidden fixture text was absent.
 
-Command:
+The live-transfer smoke uses a synthetic rollout fixture. It does not export the current Codex task or private runtime context.
 
-```bash
-OPENCODE_BIN="$HOME/.opencode/bin/opencode" \
-OPENCODE_MODEL=provider/model-authorized-for-this-user \
-npm run smoke:live-transfer
-```
+## OpenCode second review
 
-Latest result:
+Bounded read-only review job `job_1783676581578_c797be85` completed with `outputSummary.resultComplete=true` and did not spawn a subagent. Codex accepted and regression-tested stdin delivery failure and cancellation precedence, narrowed background-continuation ambiguity into explicit `continuationStarted`/`continuationResultComplete` fields, and rejected two claims that contradicted the current polling reconciliation and status re-read code.
 
-```json
-{
-  "ok": true,
-  "opencodeSessionId": "ses_codex_transfer_1782591198127",
-  "importedMessages": 8,
-  "model": "provider/model-authorized-for-this-user",
-  "sentinel": "OPENCODE_PLUGIN_CODEX_LIVE_TRANSFER_OK"
-}
-```
+Final workspace-boundary review job `job_1783679182891_59f757d2` also completed with `outputSummary.resultComplete=true` and no subagent. Codex accepted its stale `roots/list` cache finding, reproduced it with a same-connection root-change test, and removed the cache. Claims that client-supplied Codex workspace metadata was less trusted than client-supplied standard roots, that attachments should escape `cwd` into sibling roots, or that status reconciliation was an unintended side effect contradicted the current client/source contract and tests.
 
-This verifies the bundled MCP server can:
+## Background contract
 
-1. Locate the current Codex thread rollout through `CODEX_THREAD_ID`.
-2. Convert visible user/assistant transcript into OpenCode import JSON.
-3. Import it with `opencode import`.
-4. Continue the imported OpenCode session with `opencode run --session`.
-5. Receive the expected sentinel response from OpenCode.
+Background jobs run in an independent worker with private central state. A new MCP process can use the original `jobId` for status, result, and cancellation. `timeoutMs` is enforced by the worker; missing workers reconcile to `worker_unavailable`; cancellation has durable precedence over stale worker writes; and prompt input is removed after it is read. Only `outputSummary.resultComplete === true` is a final OpenCode conclusion.
 
-## Local Codex Marketplace
+## Installed plugin pickup
 
-The repository marketplace was accepted by the local Codex CLI:
-
-```bash
-codex plugin marketplace add /path/to/opencode-plugin-codex
-```
-
-Result:
-
-```text
-Added marketplace `opencode-plugin-codex` from /path/to/opencode-plugin-codex.
-Installed marketplace root: /path/to/opencode-plugin-codex
-```
+After a cachebuster update and `codex plugin add opencode-plugin-codex@opencode-plugin-codex`, verify from a new Codex task that the built-in Skill is current, all 10 tools are discoverable, the current schemas are present, and `opencode_check` accepts the project root supplied by current Codex per-call workspace metadata when standard MCP roots are empty. The check must discover OpenCode 1.17.15 without calling a model. Fresh Codex CLI task `019f4b94-5975-7b23-a2a3-9848c0826361` passed this pickup check against installed cache `0.1.0+codex.20260710103034` on 2026-07-10.

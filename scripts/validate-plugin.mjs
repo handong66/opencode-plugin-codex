@@ -6,6 +6,8 @@ const root = resolve("plugins/opencode-plugin-codex");
 const manifestPath = join(root, ".codex-plugin", "plugin.json");
 const mcpPath = join(root, ".mcp.json");
 const skillPath = join(root, "skills", "opencode", "SKILL.md");
+const serverBundlePath = join(root, "dist", "server.js");
+const workerBundlePath = join(root, "dist", "job-worker.js");
 const errors = [];
 
 function readJson(path) {
@@ -26,6 +28,8 @@ function requireString(object, field) {
 if (!existsSync(manifestPath)) errors.push("missing .codex-plugin/plugin.json");
 if (!existsSync(mcpPath)) errors.push("missing .mcp.json");
 if (!existsSync(skillPath)) errors.push("missing skills/opencode/SKILL.md");
+if (!existsSync(serverBundlePath)) errors.push("missing dist/server.js; run npm run build");
+if (!existsSync(workerBundlePath)) errors.push("missing dist/job-worker.js; run npm run build");
 
 const manifest = readJson(manifestPath);
 for (const field of ["name", "version", "description", "skills", "mcpServers"]) {
@@ -38,6 +42,15 @@ if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(manifest.version ?? "")) {
 if (manifest.skills !== "./skills/") errors.push("skills must point to ./skills/");
 if (manifest.mcpServers !== "./.mcp.json") errors.push("mcpServers must point to ./.mcp.json");
 if (!manifest.interface?.defaultPrompt?.length) errors.push("interface.defaultPrompt is required");
+for (const field of ["displayName", "shortDescription", "longDescription", "developerName", "category"]) {
+  if (typeof manifest.interface?.[field] !== "string" || !manifest.interface[field].trim()) {
+    errors.push(`plugin.json requires non-empty interface.${field}`);
+  }
+}
+if (typeof manifest.author?.name !== "string" || !manifest.author.name.trim()) {
+  errors.push("plugin.json requires non-empty author.name");
+}
+if (JSON.stringify(manifest).includes("[TODO:")) errors.push("plugin.json must not contain TODO placeholders");
 
 const mcp = readJson(mcpPath);
 const server = mcp.mcpServers?.["opencode-plugin-codex"];
@@ -55,4 +68,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-console.log(`Plugin validation passed: ${root}`);
+console.log(`Repository plugin validation passed: ${root} (run the current plugin-creator validator as the release authority)`);

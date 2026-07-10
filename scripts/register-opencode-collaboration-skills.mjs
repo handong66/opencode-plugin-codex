@@ -19,12 +19,9 @@ const codexHome = join(home, ".codex");
 const includeSuperpowers = process.env.OPENCODE_REGISTER_SUPERPOWERS === "1";
 const includeSecurity = process.env.OPENCODE_REGISTER_SECURITY_SKILLS === "1";
 const strict = process.env.OPENCODE_REGISTER_STRICT === "1";
+const hostSpecificSkillNames = ["codex-opencode-collaboration"];
 
 const directCodexSkillDirs = [
-  {
-    group: "collaboration",
-    dir: join(codexHome, "skills/codex-opencode-collaboration"),
-  },
   {
     group: "pua",
     dir: join(codexHome, "pua/skills/pua"),
@@ -189,6 +186,9 @@ const linked = [];
 const already = [];
 const conflicts = [];
 const missing = [];
+const existingHostSpecific = hostSpecificSkillNames.filter((name) =>
+  pathOrSymlinkExists(join(configSkillsDir, name))
+);
 
 for (const candidate of candidates) {
   if (!existsSync(candidate.dir)) {
@@ -242,7 +242,13 @@ console.log(
         : "default; set OPENCODE_REGISTER_SECURITY_SKILLS=1 only for explicit OpenCode security-scan workflows",
       skippedSuperpowers: includeSuperpowers
         ? false
-        : "default; set OPENCODE_REGISTER_SUPERPOWERS=1 only if OpenCode is not already loading Superpowers"
+        : "default; set OPENCODE_REGISTER_SUPERPOWERS=1 only if OpenCode is not already loading Superpowers",
+      skippedHostSpecific: [
+        "codex-opencode-collaboration (Codex owns orchestration; do not register it into OpenCode)"
+      ],
+      existingHostSpecific: existingHostSpecific.length
+        ? `${existingHostSpecific.join(", ")} already exists under OpenCode skills; this script will not delete external state automatically`
+        : []
     },
     null,
     2

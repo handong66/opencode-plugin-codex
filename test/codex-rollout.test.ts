@@ -14,4 +14,13 @@ describe("parseCodexRolloutJsonl", () => {
       { role: "user", text: "Continue in OpenCode." }
     ]);
   });
+
+  test("prefers current visible event messages over injected response items", () => {
+    const fixture = readFileSync("test/fixtures/codex-rollout-current-visible.jsonl", "utf8");
+
+    expect(parseCodexRolloutJsonl(fixture)).toEqual([
+      { role: "user", text: "Visible user request" },
+      { role: "assistant", text: "Visible assistant response" }
+    ]);
+  });
 });

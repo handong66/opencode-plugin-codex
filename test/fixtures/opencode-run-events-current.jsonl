@@ -1,0 +1,6 @@
+{"type":"step_start","sessionID":"ses_complete","part":{"type":"step-start"}}
+{"type":"text","sessionID":"ses_complete","part":{"type":"text","text":"I will inspect the target first."}}
+{"type":"step_finish","sessionID":"ses_complete","part":{"type":"step-finish","reason":"tool-calls"}}
+{"type":"step_start","sessionID":"ses_complete","part":{"type":"step-start"}}
+{"type":"text","sessionID":"ses_complete","part":{"type":"text","text":"Findings: no blocking issues."}}
+{"type":"step_finish","sessionID":"ses_complete","part":{"type":"step-finish","reason":"stop"}}

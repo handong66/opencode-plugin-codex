@@ -7,7 +7,6 @@ type JsonRecord = Record<string, unknown>;
 
 export type ParseCodexRolloutOptions = {
   maxMessages?: number;
-  includeToolOutputs?: boolean;
 };
 
 export type FindCodexRolloutOptions = {
@@ -50,7 +49,8 @@ export function parseCodexRolloutJsonl(
   jsonl: string,
   options: ParseCodexRolloutOptions = {}
 ): TranscriptMessage[] {
-  const messages: TranscriptMessage[] = [];
+  const visibleMessages: TranscriptMessage[] = [];
+  const legacyMessages: TranscriptMessage[] = [];
 
   for (const line of jsonl.split(/\r?\n/)) {
     if (!line.trim()) continue;
@@ -59,6 +59,16 @@ export function parseCodexRolloutJsonl(
     try {
       record = JSON.parse(line) as JsonRecord;
     } catch {
+      continue;
+    }
+
+    if (record.type === "event_msg") {
+      const payload = unwrapPayload(record.payload);
+      if (!payload) continue;
+      const eventType = payload.type;
+      const role = eventType === "user_message" ? "user" : eventType === "agent_message" ? "assistant" : null;
+      const text = typeof payload.message === "string" ? payload.message.trim() : "";
+      if (role && text) visibleMessages.push({ role, text });
       continue;
     }
 
@@ -73,12 +83,13 @@ export function parseCodexRolloutJsonl(
     const text = extractMessageText(item);
     if (!text) continue;
 
-    messages.push({
+    legacyMessages.push({
       role: role as TranscriptRole,
       text
     });
   }
 
+  const messages = visibleMessages.length ? visibleMessages : legacyMessages;
   if (options.maxMessages && messages.length > options.maxMessages) {
     return messages.slice(messages.length - options.maxMessages);
   }

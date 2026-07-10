@@ -1,107 +1,77 @@
 # opencode-plugin-codex
 
-Use OpenCode from Codex. This repository packages a Codex plugin with a bundled stdio MCP server so Codex can start OpenCode tasks, continue OpenCode sessions, run second-agent reviews, and transfer visible Codex thread history into an OpenCode session.
+Use OpenCode as a bounded second agent from Codex. This repository packages a Codex plugin with a Node stdio MCP server, a concise built-in OpenCode Skill, tests, and runtime smokes.
 
-This is the reverse-direction companion idea to `openai/codex-plugin-cc`: instead of using Codex inside another agent, this plugin exposes OpenCode inside Codex.
+Codex remains the owner of scope, workspace state, verification, git, and final judgment. OpenCode may review, diagnose, continue a session, or perform explicitly authorized narrow work; it must not commit, push, deploy, clean the worktree, or read hidden Codex context.
 
-## Current Status
+## Tools
 
-Implemented and locally verified:
+`plugins/opencode-plugin-codex/src/server.ts` and its tests are the machine-contract authority.
 
-- Codex plugin manifest and repo-local marketplace metadata.
-- Bundled Node-based stdio MCP server.
-- OpenCode CLI discovery through explicit argument, environment, common install paths, and `PATH`.
-- OpenCode run, continue, rescue, review, and adversarial-review tools.
-- Background OpenCode job status, result, and cancel tools.
-- Background result summaries that distinguish complete OpenCode answers from partial tool logs.
-- Codex rollout JSONL parser for visible user/assistant transcript.
-- Codex-visible transcript to OpenCode import JSON conversion.
-- `opencode_transfer` using `opencode import`, with optional post-import continuation.
+| Need | Tool |
+| --- | --- |
+| Check CLI/provider/model visibility | `opencode_check` |
+| Start a bounded task | `opencode_run` |
+| Continue an OpenCode session | `opencode_continue` |
+| Rescue diagnosis | `opencode_rescue` |
+| Normal second review | `opencode_review` |
+| Failure-mode review | `opencode_adversarial_review` |
+| Import visible Codex conversation | `opencode_transfer` |
+| Background lifecycle | `opencode_status`, `opencode_result`, `opencode_cancel` |
 
-## Tool Surface
+Important parameters and boundaries:
 
-The MCP tool registry is defined in `plugins/opencode-plugin-codex/src/server.ts`. Keep this list aligned with that file and `scripts/smoke-mcp.mjs`.
+- `prompt` is sent through stdin. It is never persisted in job records or placed in CLI argv.
+- `cwd` must resolve inside a filesystem root supplied by the MCP client through standard roots or current Codex per-call workspace metadata. `files` accepts at most 32 existing regular files whose real paths stay inside `cwd`; outside paths and escaping symlinks are rejected.
+- Configure a nonstandard OpenCode executable in the trusted MCP environment with `OPENCODE_BIN`. Tools do not expose a caller-controlled binary path.
+- `opencode_run` defaults to background mode. `timeoutMs` applies to foreground and background work.
+- `autoApprovePermissions` maps to current OpenCode `--auto`, which auto-approves permission prompts not explicitly denied. It does not allow Codex private paths. `allowCodexPrivatePaths` is a separate explicit boundary. `dangerouslySkipPermissions` remains a deprecated alias for `autoApprovePermissions` only.
+- Background state is stored in the user's private state area (normally `~/.local/state/opencode-plugin-codex`). Directories use mode `0700`; job, input, and log files use `0600`.
+- Status/result/cancel use only the returned `jobId`. An independent worker owns the OpenCode process, timeout, bounded logs, cancellation, and terminal state so MCP restarts do not lose control.
 
-- `opencode_check`
-- `opencode_run`
-- `opencode_continue`
-- `opencode_rescue`
-- `opencode_review`
-- `opencode_adversarial_review`
-- `opencode_transfer`
-- `opencode_status`
-- `opencode_result`
-- `opencode_cancel`
+Only `outputSummary.resultComplete === true` is a finished OpenCode answer. Running, queued, cancelled, failed, JSONL-error, truncated, or succeeded-without-final-text results are partial evidence. Codex must verify every accepted finding against current files and commands.
 
-For `opencode_run`, put the task instructions in `prompt`. Use `files` only for existing filesystem paths to attach; the server rejects prompt-like text in `files` before OpenCode can treat it as a missing path, and sends the prompt before `--file` arguments so OpenCode does not parse the prompt as another attachment.
+## Transfer privacy
 
-Do not ask OpenCode to read Codex private runtime paths such as `~/.codex`, `$CODEX_HOME`, or `.codex/plugins/cache` unless broader OpenCode filesystem access was explicitly requested. The plugin rejects those prompts by default because OpenCode's sandbox normally cannot read Codex's private runtime files; inline collaboration/PUA expectations in the prompt instead, or point to verified OpenCode-native skill files under `~/.config/opencode/skills`.
+`opencode_transfer` imports visible user/assistant text into OpenCode's local session database. For current Codex rollouts it prefers `event_msg.user_message` and `event_msg.agent_message`, avoiding injected response-item context; legacy response messages are fallback only. It does not transfer system/developer messages, reasoning, or tool output.
 
-For document review workflows, avoid attaching binary files such as `.docx` directly unless OpenCode can read that format. Prefer repository scripts, unpacked text, or explicit text extracts as review inputs.
+An explicit authorized `model` is required. An explicit rollout must resolve inside an MCP client workspace root or the Codex sessions directory. Import is successful only when OpenCode returns a session ID and `opencode export --sanitize` reads that session back. If an optional continuation then fails, the response preserves `opencodeSessionId`, sets `importSucceeded: true`, and reports overall `ok: false`. A background continuation reports `continuationStarted: true` and `continuationResultComplete: false`; use its job result to establish finality.
 
-Use `opencode_review` and `opencode_adversarial_review` as bounded second-pass reviews. They are not full security scans by default; prompts should name exact files or diffs and should not ask OpenCode to invoke `security-diff-scan`, threat modeling, attack-path analysis, validation skills, or subagents for the bounded review. If parallel or full security-audit work is needed, start a separate explicitly scoped OpenCode task with explicit user approval.
-
-For background jobs, read `opencode_result.outputSummary` before quoting OpenCode output. Only `succeeded_with_text` with `resultComplete: true` is a finished OpenCode answer. `queued_partial`, `running_partial`, `cancelled_partial`, `failed_partial`, and `succeeded_without_text` are process evidence only; narrow or rerun the task before treating OpenCode as having reviewed or implemented anything.
-
-## Requirements
+## Requirements and CLI discovery
 
 - Node.js `>=22`
 - npm
 - Codex with local plugin marketplace support
-- OpenCode CLI for live OpenCode actions
+- OpenCode CLI for live actions
 
-The MCP server discovers OpenCode in this order:
+Discovery order is trusted `OPENCODE_BIN`, `~/.opencode/bin/opencode`, Homebrew paths, then `PATH`.
 
-1. Tool argument `opencodeBin`.
-2. `OPENCODE_BIN`.
-3. `~/.opencode/bin/opencode`.
-4. `/opt/homebrew/bin/opencode`.
-5. `/usr/local/bin/opencode`.
-6. `PATH`.
-
-## Install From This Repository
-
-Build the bundled MCP server:
+## Install from this repository
 
 ```bash
 npm install
 npm run build
-```
-
-Add this repository as a Codex plugin marketplace if it is not already configured:
-
-```bash
 codex plugin marketplace add /path/to/opencode-plugin-codex
 ```
 
-Then install `opencode-plugin-codex` from that marketplace in Codex.
+Install `opencode-plugin-codex` from that local marketplace, then start a new Codex task so skills and MCP tools load.
 
-Optional: register selected Codex collaboration skills for OpenCode to read from `~/.config/opencode/skills`:
+During local development, refresh an existing install through the current plugin-creator cachebuster/reinstall flow; do not hand-edit marketplace or Codex configuration.
 
-```bash
-npm run register:opencode-skills
-```
-
-The registration script is conservative: it skips existing conflicting skill targets instead of overwriting them, does not symlink Superpowers by default because OpenCode may already load Superpowers from its package cache, and does not register Codex security-scan skills by default because they can escalate ordinary reviews. Set `OPENCODE_REGISTER_SUPERPOWERS=1` only when OpenCode is not already loading those skills. Set `OPENCODE_REGISTER_SECURITY_SKILLS=1` only for explicitly scoped OpenCode security-scan workflows.
-
-## Development
-
-Run the full local check before publishing README, manifest, MCP server, or tool changes:
+## Development and verification
 
 ```bash
 npm run check
+npm run test:integration
+npm run smoke:opencode-cli
+npm run smoke:background
+npm audit --json
 git diff --check
 ```
 
-`npm run check` performs:
+`npm run check` typechecks, builds both `dist/server.js` and the independent `dist/job-worker.js`, runs Vitest, validates the repository plugin shape, and smoke-tests all MCP schemas.
 
-1. TypeScript typecheck.
-2. MCP server bundle build.
-3. Vitest unit tests.
-4. Repository plugin validation.
-5. MCP smoke test that lists all expected tools.
-
-Live OpenCode transfer verification depends on local provider/model access:
+Live transfer is opt-in and uses a synthetic visible-transcript fixture rather than the current private Codex task:
 
 ```bash
 OPENCODE_BIN="$HOME/.opencode/bin/opencode" \
@@ -109,21 +79,14 @@ OPENCODE_MODEL="provider/model-authorized-for-this-user" \
 npm run smoke:live-transfer
 ```
 
-## Privacy Boundary
+The selected Codex orchestration Skill is intentionally not registered into OpenCode by `npm run register:opencode-skills`; it is host-specific. The script also skips Codex security skills and Superpowers by default unless their explicit opt-in environment flags are set.
 
-`opencode_transfer` imports visible user/assistant transcript text into OpenCode's local session database. By default it does not include Codex system messages, developer messages, tool outputs, or reasoning.
+## Documentation authority
 
-`opencode_transfer` requires an explicit authorized `model` in provider/model form. Model access is user-specific, so the plugin does not choose a default provider/model for transfer imports or continuations.
+- Plugin source and tests: machine behavior.
+- `plugins/opencode-plugin-codex/skills/opencode/SKILL.md`: concise tool/parameter/safety guidance.
+- Dong-skills `codex-opencode-collaboration`: full orchestration, review, recovery, transfer, and acceptance workflow.
+- `docs/development.md`: current architecture and maintenance rules.
+- `docs/verification.md`: dated evidence ledger.
 
-## Documentation Governance
-
-To avoid documentation drift, treat these files as having different authority:
-
-- `README.md`: current user-facing source of truth for install, capabilities, requirements, and verification commands.
-- `plugins/opencode-plugin-codex/README.md`: concise marketplace/plugin-directory summary. Keep it short and point back here for full details.
-- `docs/verification.md`: dated verification ledger. Update it when new smoke, audit, or live-transfer evidence is collected.
-- `docs/development.md`: historical design and implementation notes. It may describe planned layouts or earlier environment snapshots; do not treat it as the current repo contract without checking source files.
-- `plugins/opencode-plugin-codex/src/server.ts`: authoritative MCP tool registry.
-- `scripts/smoke-mcp.mjs`: executable guard for the tool list published in this README.
-
-When changing tools, install steps, discovery behavior, transfer privacy, or verification commands, update this README in the same commit as the code or manifest change.
+Keep the installed personal collaboration Skill as a mechanically synchronized copy of Dong-skills; do not evolve it independently.

@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 
 const opencodeBin = process.env.OPENCODE_BIN || join(homedir(), ".opencode", "bin", "opencode");
 const model = process.env.OPENCODE_MODEL;
@@ -16,7 +18,7 @@ const transport = new StdioClientTransport({
   command: "node",
   args: ["plugins/opencode-plugin-codex/dist/server.js"],
   cwd: process.cwd(),
-  env: process.env,
+  env: { ...process.env, OPENCODE_BIN: opencodeBin },
   stderr: "pipe"
 });
 
@@ -25,7 +27,13 @@ transport.stderr?.on("data", (chunk) => {
   stderr += chunk.toString();
 });
 
-const client = new Client({ name: "opencode-plugin-codex-live-transfer", version: "0.1.0" });
+const client = new Client(
+  { name: "opencode-plugin-codex-live-transfer", version: "0.1.0" },
+  { capabilities: { roots: {} } }
+);
+client.setRequestHandler(ListRootsRequestSchema, async () => ({
+  roots: [{ uri: pathToFileURL(process.cwd()).href, name: "live-transfer-workspace" }]
+}));
 
 function firstText(result) {
   return result.content?.find((item) => item.type === "text")?.text ?? "";
@@ -38,9 +46,9 @@ try {
     {
       name: "opencode_transfer",
       arguments: {
-        opencodeBin,
         model,
         cwd: process.cwd(),
+        rolloutFile: join(process.cwd(), "test/fixtures/codex-rollout-current-visible.jsonl"),
         title: `OpenCode plugin Codex live transfer ${Date.now()}`,
         maxMessages: 8,
         runAfterImport: false
@@ -62,7 +70,6 @@ try {
     {
       name: "opencode_continue",
       arguments: {
-        opencodeBin,
         model,
         cwd: process.cwd(),
         sessionId: transfer.opencodeSessionId,
@@ -79,7 +86,11 @@ try {
   }
 
   const continuation = JSON.parse(firstText(continueResult));
-  if (!continuation.ok || !continuation.stdout.includes(sentinel)) {
+  if (
+    !continuation.ok ||
+    continuation.outputSummary?.resultComplete !== true ||
+    !continuation.stdout.includes(sentinel)
+  ) {
     throw new Error(`continuation failed or missing sentinel: ${JSON.stringify(continuation, null, 2)}`);
   }
 

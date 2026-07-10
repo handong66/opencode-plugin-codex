@@ -25,9 +25,23 @@ export type RunProcessOptions = {
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
   input?: string;
+  maxOutputChars?: number;
 };
 
 const DEFAULT_TIMEOUT_MS = 60_000;
+const DEFAULT_MAX_OUTPUT_CHARS = 1_000_000;
+
+function appendOutputTail(current: string, chunk: string, maxChars: number): { value: string; truncated: boolean } {
+  const combined = current + chunk;
+  if (combined.length <= maxChars) return { value: combined, truncated: false };
+  return { value: combined.slice(-maxChars), truncated: true };
+}
+
+export function sanitizeOpenCodeEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return Object.fromEntries(
+    Object.entries(env).filter(([name, value]) => value !== undefined && !name.startsWith("CODEX_"))
+  ) as NodeJS.ProcessEnv;
+}
 
 export function expandHome(value: string, homeDir = homedir()): string {
   if (value === "~") return homeDir;
@@ -77,15 +91,20 @@ export async function runProcess(
   return await new Promise<ProcessResult>((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: options.cwd,
-      env: { ...process.env, ...(options.env ?? {}) },
+      env: sanitizeOpenCodeEnv({ ...process.env, ...(options.env ?? {}) }),
       stdio: ["pipe", "pipe", "pipe"]
     });
 
     let stdout = "";
     let stderr = "";
+    let stdoutTruncated = false;
+    let stderrTruncated = false;
+    let timedOut = false;
     let settled = false;
+    const maxOutputChars = Math.max(options.maxOutputChars ?? DEFAULT_MAX_OUTPUT_CHARS, 1);
     const timeout = setTimeout(() => {
       if (settled) return;
+      timedOut = true;
       child.kill("SIGTERM");
       setTimeout(() => {
         if (!settled) child.kill("SIGKILL");
@@ -96,10 +115,14 @@ export async function runProcess(
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => {
-      stdout += chunk;
+      const appended = appendOutputTail(stdout, chunk, maxOutputChars);
+      stdout = appended.value;
+      stdoutTruncated ||= appended.truncated;
     });
     child.stderr.on("data", (chunk) => {
-      stderr += chunk;
+      const appended = appendOutputTail(stderr, chunk, maxOutputChars);
+      stderr = appended.value;
+      stderrTruncated ||= appended.truncated;
     });
     child.on("error", (error) => {
       clearTimeout(timeout);
@@ -116,7 +139,10 @@ export async function runProcess(
         signal,
         stdout,
         stderr,
-        durationMs: Date.now() - startedAt
+        durationMs: Date.now() - startedAt,
+        stdoutTruncated,
+        stderrTruncated,
+        timedOut
       });
     });
 
@@ -186,8 +212,14 @@ export function splitModel(model?: string): { providerID: string; modelID: strin
 }
 
 export function classifyOpenCodeFailure(result: ProcessResult): string {
+  if (result.timedOut) return "timeout";
   const text = `${result.stderr}\n${result.stdout}`.toLowerCase();
-  if (text.includes("not authorized") || text.includes("unauthorized") || text.includes("forbidden")) {
+  if (
+    text.includes("not authorized") ||
+    text.includes("unauthorized") ||
+    text.includes("forbidden") ||
+    /\b(?:401|403)\b/.test(text)
+  ) {
     return "model_unauthorized";
   }
   if (text.includes("econnrefused") || text.includes("enotfound") || text.includes("timeout")) {
@@ -195,4 +227,33 @@ export function classifyOpenCodeFailure(result: ProcessResult): string {
   }
   if (result.exitCode !== 0) return "opencode_failed";
   return "unknown";
+}
+
+export function detectOpenCodeJsonlError(
+  stdout: string,
+  stderr = ""
+): { errorClass: string; message: string } | null {
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try {
+      const event = JSON.parse(line) as { type?: string; error?: unknown };
+      if (event.type !== "error" && event.error === undefined) continue;
+      const message = typeof event.error === "string" ? event.error : JSON.stringify(event.error);
+      return {
+        errorClass: classifyOpenCodeFailure({
+          command: "opencode",
+          args: [],
+          exitCode: 1,
+          signal: null,
+          stdout: message,
+          stderr,
+          durationMs: 0
+        }),
+        message
+      };
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }

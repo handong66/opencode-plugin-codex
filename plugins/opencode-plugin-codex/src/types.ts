@@ -30,4 +30,7 @@ export type ProcessResult = {
   stdout: string;
   stderr: string;
   durationMs: number;
+  stdoutTruncated?: boolean;
+  stderrTruncated?: boolean;
+  timedOut?: boolean;
 };

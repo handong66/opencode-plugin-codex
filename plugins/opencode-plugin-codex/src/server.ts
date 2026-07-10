@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { isAbsolute } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import {
+  configureWorkspaceRootsProvider,
   opencodeAdversarialReview,
   opencodeCancel,
   opencodeCheck,
@@ -26,11 +29,41 @@ const server = new McpServer(
   }
 );
 
+configureWorkspaceRootsProvider(async () => {
+  return await server.server
+    .listRoots()
+    .then(({ roots }) =>
+      roots.flatMap((root) => {
+        const url = new URL(root.uri);
+        return url.protocol === "file:" ? [fileURLToPath(url)] : [];
+      })
+    )
+    .catch(() => []);
+});
+
+function codexWorkspaceRoots(meta: unknown): string[] {
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return [];
+  const turnMetadata = (meta as Record<string, unknown>)["x-codex-turn-metadata"];
+  if (!turnMetadata || typeof turnMetadata !== "object" || Array.isArray(turnMetadata)) return [];
+  const workspaces = (turnMetadata as Record<string, unknown>).workspaces;
+  if (!workspaces || typeof workspaces !== "object" || Array.isArray(workspaces)) return [];
+  return Object.keys(workspaces).filter((root) => root.length <= 4_096 && isAbsolute(root));
+}
+
+function withCodexWorkspaceRoots<T extends Record<string, unknown>>(
+  args: T,
+  meta: unknown
+): T & { _workspaceRoots: string[] } {
+  return { ...args, _workspaceRoots: codexWorkspaceRoots(meta) };
+}
+
 const commonShape = {
-  cwd: z.string().optional().describe("Working directory for OpenCode. Defaults to the MCP server cwd."),
-  opencodeBin: z.string().optional().describe("Explicit OpenCode binary path. Defaults to OPENCODE_BIN, ~/.opencode/bin/opencode, Homebrew paths, then PATH."),
-  model: z.string().optional().describe("OpenCode model in provider/model form. Pass an actually authorized model from the user's OpenCode provider config.")
+  cwd: z.string().min(1).max(4_096).optional().describe("Working directory inside the MCP server workspace. Defaults to the workspace root."),
+  model: z.string().min(1).max(512).optional().describe("OpenCode model in provider/model form. Pass an actually authorized model from the user's OpenCode provider config.")
 };
+
+const timeoutSchema = z.number().int().positive().max(86_400_000).optional();
+const jobIdSchema = z.string().regex(/^job_[A-Za-z0-9_-]{1,128}$/);
 
 server.registerTool(
   "opencode_check",
@@ -39,11 +72,11 @@ server.registerTool(
     description: "Diagnose whether OpenCode CLI, provider, and optional model listing are available.",
     inputSchema: {
       ...commonShape,
-      provider: z.string().optional(),
+      provider: z.string().min(1).max(256).optional(),
       includeModels: z.boolean().optional()
     }
   },
-  opencodeCheck
+  (args, extra) => opencodeCheck(withCodexWorkspaceRoots(args, extra._meta))
 );
 
 server.registerTool(
@@ -54,22 +87,25 @@ server.registerTool(
     inputSchema: {
       ...commonShape,
       prompt: z
-        .string()
+        .string().min(1).max(250_000)
         .describe(
           "Task instructions or message to send to OpenCode. Put long prompts and task text here, not in files. Do not ask OpenCode to read Codex private runtime paths such as ~/.codex; inline collaboration instructions instead."
         ),
-      agent: z.string().optional(),
+      agent: z.string().min(1).max(256).optional(),
       files: z
-        .array(z.string().describe("Existing filesystem path to attach. Do not put prompt text, task descriptions, or file contents here."))
+        .array(z.string().min(1).max(1_024).describe("Existing filesystem path to attach. Do not put prompt text, task descriptions, or file contents here."))
+        .max(32)
         .optional()
         .describe("Optional existing file paths to attach to the OpenCode message."),
-      title: z.string().optional(),
+      title: z.string().min(1).max(1_024).optional(),
       background: z.boolean().optional(),
-      timeoutMs: z.number().int().positive().optional(),
-      dangerouslySkipPermissions: z.boolean().optional()
+      timeoutMs: timeoutSchema,
+      autoApprovePermissions: z.boolean().optional().describe("Use OpenCode --auto to auto-approve permission prompts while still respecting explicit deny rules."),
+      allowCodexPrivatePaths: z.boolean().optional().describe("Allow prompt references to Codex private runtime paths. Does not change OpenCode permission handling."),
+      dangerouslySkipPermissions: z.boolean().optional().describe("Deprecated compatibility alias for autoApprovePermissions. Does not allow Codex private paths.")
     }
   },
-  opencodeRun
+  (args, extra) => opencodeRun(withCodexWorkspaceRoots(args, extra._meta))
 );
 
 server.registerTool(
@@ -79,14 +115,14 @@ server.registerTool(
     description: "Continue an existing OpenCode session.",
     inputSchema: {
       ...commonShape,
-      sessionId: z.string(),
-      prompt: z.string().describe("Task instructions or message to send to OpenCode."),
+      sessionId: z.string().min(1).max(256),
+      prompt: z.string().min(1).max(250_000).describe("Task instructions or message to send to OpenCode."),
       fork: z.boolean().optional(),
       background: z.boolean().optional(),
-      timeoutMs: z.number().int().positive().optional()
+      timeoutMs: timeoutSchema
     }
   },
-  opencodeContinue
+  (args, extra) => opencodeContinue(withCodexWorkspaceRoots(args, extra._meta))
 );
 
 server.registerTool(
@@ -96,11 +132,12 @@ server.registerTool(
     description: "Ask OpenCode for an independent rescue diagnosis.",
     inputSchema: {
       ...commonShape,
-      problem: z.string(),
-      background: z.boolean().optional()
+      problem: z.string().min(1).max(250_000),
+      background: z.boolean().optional(),
+      timeoutMs: timeoutSchema
     }
   },
-  opencodeRescue
+  (args, extra) => opencodeRescue(withCodexWorkspaceRoots(args, extra._meta))
 );
 
 server.registerTool(
@@ -110,11 +147,12 @@ server.registerTool(
     description: "Ask OpenCode to review a target such as the current diff.",
     inputSchema: {
       ...commonShape,
-      target: z.string().optional(),
-      background: z.boolean().optional()
+      target: z.string().min(1).max(16_384).optional(),
+      background: z.boolean().optional(),
+      timeoutMs: timeoutSchema
     }
   },
-  opencodeReview
+  (args, extra) => opencodeReview(withCodexWorkspaceRoots(args, extra._meta))
 );
 
 server.registerTool(
@@ -124,11 +162,12 @@ server.registerTool(
     description: "Ask OpenCode to find hidden breakage paths and risky assumptions.",
     inputSchema: {
       ...commonShape,
-      target: z.string().optional(),
-      background: z.boolean().optional()
+      target: z.string().min(1).max(16_384).optional(),
+      background: z.boolean().optional(),
+      timeoutMs: timeoutSchema
     }
   },
-  opencodeAdversarialReview
+  (args, extra) => opencodeAdversarialReview(withCodexWorkspaceRoots(args, extra._meta))
 );
 
 server.registerTool(
@@ -138,18 +177,18 @@ server.registerTool(
     description: "Convert a Codex rollout transcript into an OpenCode session and import it.",
     inputSchema: {
       ...commonShape,
-      model: z.string().describe("Explicit authorized OpenCode model in provider/model form. Required because transfer import metadata cannot safely infer user-specific model access."),
-      threadId: z.string().optional(),
-      rolloutFile: z.string().optional(),
-      title: z.string().optional(),
-      maxMessages: z.number().int().positive().optional(),
+      model: z.string().min(1).max(512).describe("Explicit authorized OpenCode model in provider/model form. Required because transfer import metadata cannot safely infer user-specific model access."),
+      threadId: z.string().regex(/^[A-Za-z0-9-]{1,128}$/).optional(),
+      rolloutFile: z.string().min(1).max(4_096).optional(),
+      title: z.string().min(1).max(1_024).optional(),
+      maxMessages: z.number().int().positive().max(256).optional(),
       runAfterImport: z.boolean().optional(),
-      continuePrompt: z.string().optional(),
+      continuePrompt: z.string().min(1).max(250_000).optional(),
       background: z.boolean().optional(),
       keepTempFile: z.boolean().optional()
     }
   },
-  opencodeTransfer
+  (args, extra) => opencodeTransfer(withCodexWorkspaceRoots(args, extra._meta))
 );
 
 server.registerTool(
@@ -158,8 +197,7 @@ server.registerTool(
     title: "OpenCode Job Status",
     description: "Read a background OpenCode job record.",
     inputSchema: {
-      cwd: z.string().optional(),
-      jobId: z.string()
+      jobId: jobIdSchema
     }
   },
   opencodeStatus
@@ -171,9 +209,8 @@ server.registerTool(
     title: "OpenCode Job Result",
     description: "Read stdout/stderr tail and outputSummary for a background OpenCode job. Only outputSummary.resultComplete means OpenCode produced final text.",
     inputSchema: {
-      cwd: z.string().optional(),
-      jobId: z.string(),
-      maxChars: z.number().int().positive().optional()
+      jobId: jobIdSchema,
+      maxChars: z.number().int().positive().max(100_000).optional()
     }
   },
   opencodeResult
@@ -185,8 +222,7 @@ server.registerTool(
     title: "Cancel OpenCode Job",
     description: "Cancel a running OpenCode job.",
     inputSchema: {
-      cwd: z.string().optional(),
-      jobId: z.string()
+      jobId: jobIdSchema
     }
   },
   opencodeCancel

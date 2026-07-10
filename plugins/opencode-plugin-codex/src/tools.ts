@@ -1,19 +1,64 @@
-import { access, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
-import { classifyOpenCodeFailure, discoverOpenCode, runOpenCode, splitModel } from "./opencode-cli.js";
+import { mkdtemp, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  classifyOpenCodeFailure,
+  detectOpenCodeJsonlError,
+  discoverOpenCode,
+  runOpenCode,
+  splitModel
+} from "./opencode-cli.js";
 import { findCodexRolloutFile, readCodexTranscriptFromRollout } from "./codex-rollout.js";
 import { toOpenCodeSession } from "./opencode-session.js";
-import { JobStore } from "./job-store.js";
+import { JobStore, summarizeOpenCodeOutput, type JobRecord } from "./job-store.js";
 
 export type CommonArgs = {
   cwd?: string;
-  opencodeBin?: string;
   model?: string;
+  /** Trusted roots injected by the MCP server from per-call client metadata. */
+  _workspaceRoots?: string[];
 };
 
-function cwdOrDefault(cwd?: string): string {
-  return resolve(cwd ?? process.cwd());
+type WorkspaceRootsProvider = () => Promise<string[]>;
+
+let workspaceRootsProvider: WorkspaceRootsProvider = async () => [process.cwd()];
+
+export function configureWorkspaceRootsProvider(provider: WorkspaceRootsProvider): void {
+  workspaceRootsProvider = provider;
+}
+
+function isWithin(root: string, candidate: string): boolean {
+  const relativePath = relative(root, candidate);
+  return relativePath === "" || (!relativePath.startsWith(`..${sep}`) && relativePath !== ".." && !isAbsolute(relativePath));
+}
+
+async function cwdOrDefault(cwd?: string, requestWorkspaceRoots: string[] = []): Promise<string> {
+  const providedRoots = [...new Set([...(await workspaceRootsProvider()), ...requestWorkspaceRoots])];
+  const workspaceRoots = await Promise.all(
+    providedRoots.map(async (root) => {
+      const resolvedRoot = await realpath(root);
+      if (!(await stat(resolvedRoot)).isDirectory()) {
+        throw new Error(`MCP workspace root is not a directory: ${resolvedRoot}.`);
+      }
+      return resolvedRoot;
+    })
+  );
+  if (!workspaceRoots.length) {
+    throw new Error("The MCP client did not provide a filesystem workspace root.");
+  }
+  let candidate: string;
+  try {
+    candidate = await realpath(resolve(cwd ?? workspaceRoots[0]));
+  } catch {
+    throw new Error(`Working directory does not exist: ${cwd ?? workspaceRoots[0]}.`);
+  }
+  if (!workspaceRoots.some((root) => isWithin(root, candidate))) {
+    throw new Error(`Working directory is outside the MCP workspace roots: ${candidate}.`);
+  }
+  if (!(await stat(candidate)).isDirectory()) {
+    throw new Error(`Working directory is not a directory: ${candidate}.`);
+  }
+  return candidate;
 }
 
 function jsonText(value: unknown) {
@@ -24,7 +69,6 @@ function jsonText(value: unknown) {
 }
 
 function buildRunArgs(params: {
-  prompt: string;
   cwd: string;
   model?: string;
   agent?: string;
@@ -32,6 +76,7 @@ function buildRunArgs(params: {
   fork?: boolean;
   files?: string[];
   title?: string;
+  autoApprovePermissions?: boolean;
   dangerouslySkipPermissions?: boolean;
 }) {
   const args = ["run", "--format", "json", "--dir", params.cwd];
@@ -40,8 +85,7 @@ function buildRunArgs(params: {
   if (params.sessionId) args.push("--session", params.sessionId);
   if (params.fork) args.push("--fork");
   if (params.title) args.push("--title", params.title);
-  if (params.dangerouslySkipPermissions) args.push("--dangerously-skip-permissions");
-  args.push(params.prompt);
+  if (params.autoApprovePermissions || params.dangerouslySkipPermissions) args.push("--auto");
   for (const file of params.files ?? []) args.push("--file", file);
   return args;
 }
@@ -52,6 +96,7 @@ function describeFileValue(file: string): string {
 }
 
 async function validateFileAttachments(files: string[] | undefined, cwd: string): Promise<void> {
+  const workspaceRoot = await realpath(cwd);
   for (const file of files ?? []) {
     if (!file.trim()) {
       throw new Error("files only accepts filesystem paths. Put task text in prompt.");
@@ -63,25 +108,51 @@ async function validateFileAttachments(files: string[] | undefined, cwd: string)
     }
 
     const filePath = isAbsolute(file) ? file : resolve(cwd, file);
+    let resolvedFile: string;
     try {
-      await access(filePath);
+      resolvedFile = await realpath(filePath);
     } catch {
       throw new Error(
         `File attachment not found: ${describeFileValue(file)}. files only accepts existing filesystem paths; put task text in prompt.`
       );
     }
+    const relativePath = relative(workspaceRoot, resolvedFile);
+    if (relativePath.startsWith(`..${sep}`) || relativePath === ".." || isAbsolute(relativePath)) {
+      throw new Error(`File attachment is outside the active workspace: ${describeFileValue(file)}.`);
+    }
+    if (!(await stat(resolvedFile)).isFile()) {
+      throw new Error(`File attachment must be a regular file: ${describeFileValue(file)}.`);
+    }
   }
 }
 
-function validatePromptBoundary(prompt: string, dangerouslySkipPermissions?: boolean): void {
-  if (dangerouslySkipPermissions) return;
+async function validateRolloutFile(rolloutFile: string, cwd: string): Promise<string> {
+  const resolvedFile = await realpath(rolloutFile).catch(() => {
+    throw new Error(`Rollout file does not exist: ${rolloutFile}.`);
+  });
+  const roots = [await realpath(cwd)];
+  const codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex");
+  const sessionsRoot = await realpath(join(codexHome, "sessions")).catch(() => null);
+  if (sessionsRoot) roots.push(sessionsRoot);
+
+  if (!roots.some((root) => isWithin(root, resolvedFile))) {
+    throw new Error(`Rollout file is outside the workspace and Codex sessions directory: ${rolloutFile}.`);
+  }
+  if (!(await stat(resolvedFile)).isFile() || !resolvedFile.endsWith(".jsonl")) {
+    throw new Error(`Rollout file must be a JSONL file: ${rolloutFile}.`);
+  }
+  return resolvedFile;
+}
+
+function validatePromptBoundary(prompt: string, allowCodexPrivatePaths?: boolean): void {
+  if (allowCodexPrivatePaths) return;
 
   const codexPrivatePathPattern = /(?:^|[\s"'`(])(?:~|\$HOME|\/[^\s"'`)]+)\/\.codex(?:\/|\b)/;
   if (codexPrivatePathPattern.test(prompt)) {
     throw new Error(
       "Prompt asks OpenCode to read Codex private runtime paths such as ~/.codex. " +
         "Inline the collaboration instructions in prompt, or use OpenCode-native skill paths under ~/.config/opencode/skills. " +
-        "Set dangerouslySkipPermissions only when the user explicitly asks to grant broader OpenCode filesystem access."
+        "Set allowCodexPrivatePaths only when the user explicitly authorizes that private path access."
     );
   }
 }
@@ -90,6 +161,7 @@ async function runOrStartJob(params: {
   kind: "run" | "continue" | "rescue" | "review" | "adversarial_review" | "transfer";
   prompt: string;
   cwd?: string;
+  _workspaceRoots?: string[];
   model?: string;
   agent?: string;
   sessionId?: string;
@@ -97,21 +169,25 @@ async function runOrStartJob(params: {
   files?: string[];
   title?: string;
   background?: boolean;
-  opencodeBin?: string;
+  trustedOpenCodeBin?: string;
   timeoutMs?: number;
+  autoApprovePermissions?: boolean;
+  allowCodexPrivatePaths?: boolean;
   dangerouslySkipPermissions?: boolean;
 }) {
-  const cwd = cwdOrDefault(params.cwd);
-  validatePromptBoundary(params.prompt, params.dangerouslySkipPermissions);
+  const cwd = await cwdOrDefault(params.cwd, params._workspaceRoots);
+  validatePromptBoundary(params.prompt, params.allowCodexPrivatePaths);
   await validateFileAttachments(params.files, cwd);
   const args = buildRunArgs({ ...params, cwd });
   if (params.background ?? true) {
-    const store = new JobStore(cwd);
+    const store = new JobStore();
     const job = await store.startOpenCodeJob({
       kind: params.kind,
       cwd,
       args,
-      opencodeBin: params.opencodeBin,
+      prompt: params.prompt,
+      timeoutMs: params.timeoutMs,
+      opencodeBin: params.trustedOpenCodeBin,
       opencodeSessionId: params.sessionId
     });
     return jsonText({ ok: true, background: true, job });
@@ -119,21 +195,45 @@ async function runOrStartJob(params: {
 
   const result = await runOpenCode(args, {
     cwd,
-    opencodeBin: params.opencodeBin,
-    timeoutMs: params.timeoutMs ?? 600_000
+    opencodeBin: params.trustedOpenCodeBin,
+    timeoutMs: params.timeoutMs ?? 600_000,
+    input: params.prompt
   });
+  const structuredError = detectOpenCodeJsonlError(result.stdout, result.stderr);
+  const processSucceeded = result.exitCode === 0 && !structuredError;
+  const completedAt = new Date().toISOString();
+  const summaryRecord: JobRecord = {
+    id: "job_foreground_summary",
+    kind: params.kind,
+    status: processSucceeded ? "succeeded" : "failed",
+    cwd,
+    command: result.bin,
+    args,
+    createdAt: completedAt,
+    startedAt: completedAt,
+    finishedAt: completedAt,
+    timeoutMs: params.timeoutMs ?? 600_000,
+    exitCode: result.exitCode,
+    signal: result.signal,
+    errorClass: structuredError?.errorClass ?? (processSucceeded ? undefined : classifyOpenCodeFailure(result)),
+    stdoutPath: "",
+    stderrPath: ""
+  };
   return jsonText({
-    ok: result.exitCode === 0,
+    ok: processSucceeded,
     bin: result.bin,
     exitCode: result.exitCode,
     stdout: result.stdout,
     stderr: result.stderr,
-    errorClass: result.exitCode === 0 ? undefined : classifyOpenCodeFailure(result)
+    stdoutTruncated: result.stdoutTruncated,
+    stderrTruncated: result.stderrTruncated,
+    errorClass: summaryRecord.errorClass,
+    outputSummary: summarizeOpenCodeOutput(summaryRecord, result.stdout, result.stderr)
   });
 }
 
 export async function opencodeCheck(args: CommonArgs & { provider?: string; includeModels?: boolean }) {
-  const discovered = await discoverOpenCode({ opencodeBin: args.opencodeBin });
+  const discovered = await discoverOpenCode();
   const warnings: string[] = [];
   const data: Record<string, unknown> = {
     ok: discovered.ok,
@@ -145,7 +245,7 @@ export async function opencodeCheck(args: CommonArgs & { provider?: string; incl
 
   if (!discovered.ok) return jsonText({ ...data, warnings });
 
-  const cwd = cwdOrDefault(args.cwd);
+  const cwd = await cwdOrDefault(args.cwd, args._workspaceRoots);
   const providers = await runOpenCode(["providers", "list"], {
     cwd,
     opencodeBin: discovered.bin,
@@ -155,6 +255,9 @@ export async function opencodeCheck(args: CommonArgs & { provider?: string; incl
     return null;
   });
   if (providers) data.providersRaw = providers.stdout || providers.stderr;
+  if (providers && providers.exitCode !== 0) {
+    warnings.push(`providers list exited ${providers.exitCode}: ${(providers.stderr || providers.stdout).trim()}`);
+  }
 
   if (args.includeModels && args.provider) {
     const models = await runOpenCode(["models", args.provider], {
@@ -166,6 +269,9 @@ export async function opencodeCheck(args: CommonArgs & { provider?: string; incl
       return null;
     });
     if (models) data.modelsRaw = models.stdout || models.stderr;
+    if (models && models.exitCode !== 0) {
+      warnings.push(`models ${args.provider} exited ${models.exitCode}: ${(models.stderr || models.stdout).trim()}`);
+    }
   }
 
   return jsonText({ ...data, warnings });
@@ -178,6 +284,8 @@ export async function opencodeRun(args: CommonArgs & {
   title?: string;
   background?: boolean;
   timeoutMs?: number;
+  autoApprovePermissions?: boolean;
+  allowCodexPrivatePaths?: boolean;
   dangerouslySkipPermissions?: boolean;
 }) {
   return runOrStartJob({ ...args, kind: "run" });
@@ -196,6 +304,7 @@ export async function opencodeContinue(args: CommonArgs & {
 export async function opencodeRescue(args: CommonArgs & {
   problem: string;
   background?: boolean;
+  timeoutMs?: number;
 }) {
   const prompt = [
     "You are OpenCode acting as an independent rescue reviewer for a Codex task.",
@@ -210,6 +319,7 @@ export async function opencodeRescue(args: CommonArgs & {
 export async function opencodeReview(args: CommonArgs & {
   target?: string;
   background?: boolean;
+  timeoutMs?: number;
 }) {
   const target = args.target ?? "current working tree";
   const prompt = [
@@ -227,6 +337,7 @@ export async function opencodeReview(args: CommonArgs & {
 export async function opencodeAdversarialReview(args: CommonArgs & {
   target?: string;
   background?: boolean;
+  timeoutMs?: number;
 }) {
   const target = args.target ?? "current working tree";
   const prompt = [
@@ -252,9 +363,10 @@ export async function opencodeTransfer(args: CommonArgs & {
   background?: boolean;
   keepTempFile?: boolean;
 }) {
-  const cwd = cwdOrDefault(args.cwd);
+  const cwd = await cwdOrDefault(args.cwd, args._workspaceRoots);
   const warnings: string[] = [];
-  const rolloutFile = args.rolloutFile ?? (await findCodexRolloutFile({ threadId: args.threadId }));
+  const requestedRolloutFile = args.rolloutFile ?? (await findCodexRolloutFile({ threadId: args.threadId }));
+  const rolloutFile = requestedRolloutFile ? await validateRolloutFile(requestedRolloutFile, cwd) : null;
   if (!rolloutFile) {
     return jsonText({
       ok: false,
@@ -278,7 +390,7 @@ export async function opencodeTransfer(args: CommonArgs & {
     });
   }
 
-  const discovered = await discoverOpenCode({ opencodeBin: args.opencodeBin });
+  const discovered = await discoverOpenCode();
   if (!discovered.ok || !discovered.bin) {
     return jsonText({
       ok: false,
@@ -312,7 +424,7 @@ export async function opencodeTransfer(args: CommonArgs & {
 
   const tempDir = await mkdtemp(join(tmpdir(), "opencode-plugin-codex-"));
   const importFile = join(tempDir, "session.json");
-  await writeFile(importFile, `${JSON.stringify(session, null, 2)}\n`);
+  await writeFile(importFile, `${JSON.stringify(session, null, 2)}\n`, { mode: 0o600 });
 
   const imported = await runOpenCode(["import", importFile], {
     cwd,
@@ -320,7 +432,6 @@ export async function opencodeTransfer(args: CommonArgs & {
     timeoutMs: 60_000
   });
   const match = imported.stdout.match(/Imported session:\s*(\S+)/);
-  const opencodeSessionId = match?.[1] ?? String(session.info.id);
 
   if (!args.keepTempFile) {
     await rm(tempDir, { recursive: true, force: true });
@@ -328,14 +439,48 @@ export async function opencodeTransfer(args: CommonArgs & {
     warnings.push(`Kept transfer JSON at ${importFile}`);
   }
 
-  if (imported.exitCode !== 0) {
+  if (imported.exitCode !== 0 || !match?.[1]) {
     return jsonText({
       ok: false,
       error: {
         code: "opencode_import_failed",
-        message: imported.stderr || imported.stdout,
+        message:
+          imported.stderr ||
+          imported.stdout ||
+          "OpenCode import exited without confirming an imported session ID.",
         details: imported
       },
+      importFile: args.keepTempFile ? importFile : undefined
+    });
+  }
+  const opencodeSessionId = match[1];
+  const exported = await runOpenCode(["export", opencodeSessionId, "--sanitize"], {
+    cwd,
+    opencodeBin: discovered.bin,
+    timeoutMs: 60_000
+  });
+  let exportedSessionId: string | undefined;
+  try {
+    const readback = JSON.parse(exported.stdout) as { info?: { id?: string } };
+    exportedSessionId = readback.info?.id;
+  } catch {
+    exportedSessionId = undefined;
+  }
+  const readbackConfirmed =
+    exportedSessionId === opencodeSessionId ||
+    (exported.stdoutTruncated === true && exported.stdout.includes(opencodeSessionId));
+  if (exported.exitCode !== 0 || !readbackConfirmed) {
+    return jsonText({
+      ok: false,
+      error: {
+        code: "opencode_import_verify_failed",
+        message:
+          exported.stderr ||
+          exported.stdout ||
+          `OpenCode could not read back imported session ${opencodeSessionId}.`,
+        details: exported
+      },
+      opencodeSessionId,
       importFile: args.keepTempFile ? importFile : undefined
     });
   }
@@ -349,22 +494,30 @@ export async function opencodeTransfer(args: CommonArgs & {
       model: args.model,
       sessionId: opencodeSessionId,
       background: args.background ?? true,
-      opencodeBin: discovered.bin
+      trustedOpenCodeBin: discovered.bin
     });
+    const continuation = JSON.parse(runResult.content[0].text) as {
+      ok?: boolean;
+      outputSummary?: { resultComplete?: boolean };
+    };
     return jsonText({
-      ok: true,
+      ok: continuation.ok === true,
+      importSucceeded: true,
+      continuationStarted: continuation.ok === true,
+      continuationResultComplete: continuation.outputSummary?.resultComplete === true,
       opencodeSessionId,
       importedMessages: transcript.length,
       source: "codex-jsonl",
       rolloutFile,
       model: splitModel(args.model),
       warnings,
-      continuation: JSON.parse(runResult.content[0].text)
+      continuation
     });
   }
 
   return jsonText({
     ok: true,
+    importSucceeded: true,
     opencodeSessionId,
     importedMessages: transcript.length,
     source: "codex-jsonl",
@@ -374,17 +527,17 @@ export async function opencodeTransfer(args: CommonArgs & {
   });
 }
 
-export async function opencodeStatus(args: { cwd?: string; jobId: string }) {
-  const store = new JobStore(cwdOrDefault(args.cwd));
-  return jsonText({ ok: true, job: await store.read(args.jobId) });
+export async function opencodeStatus(args: { jobId: string }) {
+  const store = new JobStore();
+  return jsonText({ ok: true, job: await store.status(args.jobId) });
 }
 
-export async function opencodeResult(args: { cwd?: string; jobId: string; maxChars?: number }) {
-  const store = new JobStore(cwdOrDefault(args.cwd));
+export async function opencodeResult(args: { jobId: string; maxChars?: number }) {
+  const store = new JobStore();
   return jsonText({ ok: true, ...(await store.result(args.jobId, args.maxChars)) });
 }
 
-export async function opencodeCancel(args: { cwd?: string; jobId: string }) {
-  const store = new JobStore(cwdOrDefault(args.cwd));
+export async function opencodeCancel(args: { jobId: string }) {
+  const store = new JobStore();
   return jsonText({ ok: true, job: await store.cancel(args.jobId) });
 }

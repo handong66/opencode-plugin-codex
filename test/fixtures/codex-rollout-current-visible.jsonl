@@ -1,0 +1,4 @@
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<recommended_plugins>hidden injected context</recommended_plugins>\n# AGENTS.md instructions\nhidden runtime instructions\nVisible user request"}]}}
+{"type":"event_msg","payload":{"type":"user_message","message":"Visible user request"}}
+{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Visible assistant response"}]}}
+{"type":"event_msg","payload":{"type":"agent_message","message":"Visible assistant response"}}

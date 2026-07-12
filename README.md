@@ -4,6 +4,8 @@ Use OpenCode as a bounded second agent from Codex. This repository packages a Co
 
 Codex remains the owner of scope, workspace state, verification, git, and final judgment. OpenCode may review, diagnose, continue a session, or perform explicitly authorized narrow work; it must not commit, push, deploy, clean the worktree, or read hidden Codex context.
 
+Project write-up: [han-dong.link/en/work/opencode-plugin-codex](https://han-dong.link/en/work/opencode-plugin-codex)
+
 ## Tools
 
 `plugins/opencode-plugin-codex/src/server.ts` and its tests are the machine-contract authority.

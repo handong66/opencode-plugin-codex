@@ -603,6 +603,7 @@ describe("opencodeTransfer", () => {
       ) as ReturnType<typeof parseToolResult> & {
         importSucceeded?: boolean;
         opencodeSessionId?: string;
+        error?: { code: string; message: string; retryable: boolean };
         continuation?: { ok: boolean; errorClass?: string };
       };
 
@@ -611,6 +612,13 @@ describe("opencodeTransfer", () => {
       expect(result.opencodeSessionId).toBe("ses_fake_continue");
       expect(result.continuation?.ok).toBe(false);
       expect(result.continuation?.errorClass).toBe("model_unauthorized");
+      // ok:false with no error{} is the one shape OC-9 forbids: error.code is what a
+      // 0.2 orchestrator switches on, and it used to be undefined here — a caller
+      // could only find the cause by digging into data.continuation.
+      expect(result.error?.code).toBe("model_unauthorized");
+      expect(result.error?.retryable).toBe(false);
+      expect(result.error?.message).toContain("ses_fake_continue");
+      expect(result.error?.message).toContain("continuation run failed");
     } finally {
       if (previous === undefined) delete process.env.OPENCODE_BIN;
       else process.env.OPENCODE_BIN = previous;

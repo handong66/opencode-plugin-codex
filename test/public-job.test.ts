@@ -1,14 +1,44 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 import { JobStore, toPublicJob, type JobRecord } from "../plugins/opencode-plugin-codex/src/job-store.js";
 import {
   opencodeCancel,
   opencodeResult,
-  opencodeStatus
+  opencodeStatus,
+  opencodeTransfer
 } from "../plugins/opencode-plugin-codex/src/tools.js";
+import { resetOpenCodeDiscoveryCache } from "../plugins/opencode-plugin-codex/src/opencode-cli.js";
+import { resetEffectiveModelCache } from "../plugins/opencode-plugin-codex/src/model-guard.js";
 
 const INTERNAL_FIELDS = ["command", "args", "workerPid", "pid", "stdoutPath", "stderrPath"];
+
+const ROLLOUT_FIXTURE = join(process.cwd(), "test/fixtures/codex-rollout-current-visible.jsonl");
+
+afterEach(() => {
+  resetOpenCodeDiscoveryCache();
+  resetEffectiveModelCache();
+});
+
+/** A fake CLI at a path distinctive enough to grep the whole envelope for. */
+async function withFakeTransferCli<T>(body: string[], run: (bin: string) => Promise<T>): Promise<T> {
+  const binDir = await mkdtemp(join(tmpdir(), "opencode-plugin-codex-transfer-wire-"));
+  const previous = process.env.OPENCODE_BIN;
+  try {
+    const bin = join(binDir, "fake-transfer-opencode.mjs");
+    await writeFile(bin, ["#!/usr/bin/env node", ...body].join("\n"));
+    await chmod(bin, 0o755);
+    process.env.OPENCODE_BIN = bin;
+    resetOpenCodeDiscoveryCache();
+    resetEffectiveModelCache();
+    return await run(bin);
+  } finally {
+    if (previous === undefined) delete process.env.OPENCODE_BIN;
+    else process.env.OPENCODE_BIN = previous;
+    await rm(binDir, { recursive: true, force: true });
+  }
+}
 
 async function withJob<T>(run: (context: { jobId: string; stateDir: string }) => Promise<T>): Promise<T> {
   const stateDir = await mkdtemp(join(process.cwd(), ".opencode-plugin-codex-public-"));
@@ -98,6 +128,40 @@ describe("job records on the wire", () => {
         expect(serialized, name).toContain("ses_public");
       }
     });
+  });
+
+  test("a failed transfer import reports the exit code, not the whole ProcessResult", async () => {
+    await withFakeTransferCli(
+      [
+        "if (process.argv[2] === '--version') { console.log('1.18.16'); process.exit(0); }",
+        "if (process.argv[2] === 'debug') { console.log(JSON.stringify({ model: 'aihubmix/x' })); process.exit(0); }",
+        "if (process.argv[2] === 'import') { console.error('import failed: session store is locked'); process.exit(1); }",
+        "console.log('{}');"
+      ],
+      async (bin) => {
+        const response = await opencodeTransfer({ cwd: process.cwd(), rolloutFile: ROLLOUT_FIXTURE });
+        const envelope = response.structuredContent as {
+          ok: boolean;
+          error?: { code: string; message: string; details?: unknown };
+        };
+        const serialized = JSON.stringify(response.structuredContent);
+
+        expect(envelope.ok).toBe(false);
+        expect(envelope.error?.code).toBe("opencode_import_failed");
+        // `details: imported` put the resolved binary, the full argv — including the
+        // temporary session file this plugin wrote — and both complete streams into
+        // the caller's transcript. Only the two facts a caller acts on travel now.
+        expect(envelope.error?.details).toEqual({
+          exitCode: 1,
+          stderrTail: "import failed: session store is locked"
+        });
+        expect(serialized).not.toContain(bin);
+        expect(serialized).not.toContain("session.json");
+        expect(serialized).not.toContain('"args"');
+        // The CLI's own words still reach the caller.
+        expect(envelope.error?.message).toContain("session store is locked");
+      }
+    );
   });
 
   test("an unknown job id is a typed refusal, not a raw ENOENT with the state path", async () => {

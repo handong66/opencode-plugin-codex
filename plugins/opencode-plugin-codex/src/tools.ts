@@ -927,6 +927,53 @@ export async function opencodeTransfer(args: TransferArgs) {
   return guarded(() => opencodeTransferImpl(args));
 }
 
+/** How much of a failed helper CLI's stderr travels in `error.details`. */
+const TRANSFER_STDERR_TAIL_CHARS = 2_000;
+
+/**
+ * What a failed `opencode import` / `opencode export` is allowed to put on the wire.
+ *
+ * The whole `ProcessResult` used to go into `error.details`: the resolved binary,
+ * the full argv including the temporary session file's path, and both complete
+ * streams. That is the payload class `toPublicJob` (OX5) exists to keep out of the
+ * caller's transcript, and it is not what a caller branches on. The exit code and a
+ * bounded stderr tail are.
+ */
+function processFailureDetails(result: {
+  exitCode: number | null;
+  stderr: string;
+}): { exitCode: number | null; stderrTail?: string } {
+  const stderrTail = result.stderr.trim().slice(-TRANSFER_STDERR_TAIL_CHARS);
+  return { exitCode: result.exitCode, ...(stderrTail ? { stderrTail } : {}) };
+}
+
+/**
+ * The outer envelope of a transfer whose continuation failed.
+ *
+ * `ok: false` with no `error` is the one shape OC-9 forbids — `error.code` is what a
+ * 0.2 orchestrator switches on, and a transfer that imported cleanly and then failed
+ * to continue used to ship exactly that. The continuation's own typed error is
+ * carried outward unchanged apart from a sentence saying the import itself
+ * succeeded, so the caller routes on the real cause (`model_unauthorized`,
+ * `timeout`, …) rather than on a code invented here.
+ */
+function continuationError(
+  continuation: { error?: ToolError; errorClass?: string },
+  opencodeSessionId: string
+): ToolError {
+  const prefix =
+    `The Codex transcript was imported into OpenCode session ${opencodeSessionId}, but the continuation run failed: `;
+  if (continuation.error) {
+    return { ...continuation.error, message: `${prefix}${continuation.error.message}` };
+  }
+  const code = continuation.errorClass ?? "opencode_failed";
+  return {
+    code,
+    message: `${prefix}${openCodeFailureMessage(code)}`,
+    retryable: isRetryableOpenCodeFailure(code)
+  };
+}
+
 async function opencodeTransferImpl(args: TransferArgs) {
   const cwd = await cwdOrDefault(args.cwd, args._workspaceRoots);
   const warnings: string[] = [];
@@ -1034,7 +1081,7 @@ async function opencodeTransferImpl(args: TransferArgs) {
           imported.stdout ||
           "OpenCode import exited without confirming an imported session ID.",
         retryable: true,
-        details: imported
+        details: processFailureDetails(imported)
       },
       data: { importFile: args.keepTempFile ? importFile : undefined },
       warnings
@@ -1066,7 +1113,7 @@ async function opencodeTransferImpl(args: TransferArgs) {
           exported.stdout ||
           `OpenCode could not read back imported session ${opencodeSessionId}.`,
         retryable: true,
-        details: exported
+        details: processFailureDetails(exported)
       },
       data: { opencodeSessionId, importFile: args.keepTempFile ? importFile : undefined },
       warnings
@@ -1090,10 +1137,14 @@ async function opencodeTransferImpl(args: TransferArgs) {
     // duplicated into content[0].text.
     const continuation = runResult.structuredContent as {
       ok?: boolean;
+      error?: ToolError;
+      errorClass?: string;
       data?: { outputSummary?: { resultComplete?: boolean } };
     };
+    const continuationOk = continuation.ok === true;
     return envelope({
-      ok: continuation.ok === true,
+      ok: continuationOk,
+      ...(continuationOk ? {} : { error: continuationError(continuation, opencodeSessionId) }),
       data: {
         importSucceeded: true,
         continuationStarted: continuation.ok === true,

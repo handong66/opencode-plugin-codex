@@ -46,6 +46,15 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   `cancelRequestedAt` and `outputTruncated`. The projection matches
   grok-plugin-codex's `toPublicJob()`, field names included, and a test asserts no
   argv entry, pid, or state path appears in a tool result.
+- **OC-9 / OX5 (`opencode_transfer`)** A transfer whose `runAfterImport`
+  continuation fails now carries the continuation's own typed `error` on the outer
+  envelope (its `code` and `retryable`, with a message saying the import itself
+  succeeded and naming the OpenCode session). It used to return `ok: false` with
+  `error` undefined, so the only statement of the cause was inside
+  `data.continuation`. `opencode_import_failed` and `opencode_import_verify_failed`
+  now carry `details: { exitCode, stderrTail }` instead of the whole `ProcessResult`
+  — that object held the resolved binary, the full argv including this plugin's
+  temporary session file, and both complete streams.
 
 ### Changed
 

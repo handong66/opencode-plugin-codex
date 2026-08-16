@@ -19,6 +19,7 @@ Project write-up: [han-dong.link/en/work/opencode-plugin-codex](https://han-dong
 | Normal second review | `opencode_review` |
 | Failure-mode review | `opencode_adversarial_review` |
 | Import visible Codex conversation | `opencode_transfer` |
+| Find a lost session or job handle | `opencode_sessions` |
 | Background lifecycle | `opencode_status`, `opencode_result`, `opencode_cancel` |
 
 Important parameters and boundaries:

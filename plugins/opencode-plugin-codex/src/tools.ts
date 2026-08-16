@@ -55,7 +55,7 @@ function isWithin(root: string, candidate: string): boolean {
   return relativePath === "" || (!relativePath.startsWith(`..${sep}`) && relativePath !== ".." && !isAbsolute(relativePath));
 }
 
-async function cwdOrDefault(cwd?: string, requestWorkspaceRoots: string[] = []): Promise<string> {
+async function resolvedWorkspaceRoots(requestWorkspaceRoots: string[] = []): Promise<string[]> {
   const providedRoots = [...new Set([...(await workspaceRootsProvider()), ...requestWorkspaceRoots])];
   // Deliberately still Promise.all and still fail-closed: no recorded event ever hit
   // a root realpath failure, and loosening a boundary for a hypothetical is a bad
@@ -80,6 +80,11 @@ async function cwdOrDefault(cwd?: string, requestWorkspaceRoots: string[] = []):
         "opencode_check still returns CLI and effective-model diagnostics in this state; execution tools do not run."
     );
   }
+  return workspaceRoots;
+}
+
+async function cwdOrDefault(cwd?: string, requestWorkspaceRoots: string[] = []): Promise<string> {
+  const workspaceRoots = await resolvedWorkspaceRoots(requestWorkspaceRoots);
   let candidate: string;
   try {
     candidate = await realpath(resolve(cwd ?? workspaceRoots[0]));
@@ -988,6 +993,114 @@ async function opencodeTransferImpl(args: TransferArgs) {
       source: "codex-jsonl",
       rolloutFile,
       model: splitModel(args.model)
+    },
+    warnings
+  });
+}
+
+/**
+ * Recovery of last resort.
+ *
+ * 287 timed-out jobs kept neither a session id nor a surviving log, and a caller
+ * that lost its jobId had exactly one way back to its own work: a raw `opencode`
+ * CLI call — the path that produced the 2026-08-14 incident, where a direct
+ * invocation with an explicit `--model` created a session the plugin never saw. The
+ * sibling plugin has had a session listing since 0.2; this is its counterpart.
+ */
+type OpenCodeSessionSummary = {
+  id: string;
+  title?: string;
+  directory?: string;
+  updatedAt?: string;
+  createdAt?: string;
+};
+
+const MAX_SESSION_SCAN = 200;
+
+function toSessionSummary(value: unknown): OpenCodeSessionSummary | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const session = value as {
+    id?: unknown;
+    title?: unknown;
+    directory?: unknown;
+    updated?: unknown;
+    created?: unknown;
+  };
+  if (typeof session.id !== "string" || !session.id.trim()) return undefined;
+  const asIso = (epochMs: unknown): string | undefined =>
+    typeof epochMs === "number" && Number.isFinite(epochMs) ? new Date(epochMs).toISOString() : undefined;
+  return {
+    id: session.id,
+    ...(typeof session.title === "string" ? { title: session.title } : {}),
+    ...(typeof session.directory === "string" ? { directory: session.directory } : {}),
+    ...(asIso(session.updated) ? { updatedAt: asIso(session.updated) } : {}),
+    ...(asIso(session.created) ? { createdAt: asIso(session.created) } : {})
+  };
+}
+
+export async function opencodeSessions(args: CommonArgs & { limit?: number; includeAllDirectories?: boolean }) {
+  return guarded(() => opencodeSessionsImpl(args));
+}
+
+async function opencodeSessionsImpl(args: CommonArgs & { limit?: number; includeAllDirectories?: boolean }) {
+  const roots = await resolvedWorkspaceRoots(args._workspaceRoots);
+  const cwd = await cwdOrDefault(args.cwd, args._workspaceRoots);
+  const limit = Math.min(Math.max(args.limit ?? 20, 1), 100);
+  const warnings: string[] = [];
+
+  const listed = await runOpenCode(["session", "list", "--format", "json", "-n", String(MAX_SESSION_SCAN)], {
+    cwd,
+    timeoutMs: 30_000
+  });
+  if (listed.exitCode !== 0) {
+    return envelope({
+      ok: false,
+      error: {
+        code: "session_listing_failed",
+        message: `opencode session list exited ${listed.exitCode ?? "null"}: ${(listed.stderr || listed.stdout).trim().slice(0, 2_000)}`,
+        retryable: true
+      },
+      warnings
+    });
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(listed.stdout);
+  } catch {
+    return envelope({
+      ok: false,
+      error: {
+        code: "session_listing_failed",
+        message: "opencode session list did not return parseable JSON.",
+        retryable: true
+      },
+      warnings
+    });
+  }
+
+  const all = (Array.isArray(parsed) ? parsed : [])
+    .map(toSessionSummary)
+    .filter((session): session is OpenCodeSessionSummary => session !== undefined);
+  // Default to this caller's own workspace: a session listing is a list of the
+  // user's work, and the recovery case only ever needs the current project.
+  const scoped = args.includeAllDirectories
+    ? all
+    : all.filter((session) => session.directory && roots.some((root) => isWithin(root, session.directory!)));
+  if (!args.includeAllDirectories && all.length && !scoped.length) {
+    warnings.push(
+      `None of the ${all.length} most recent OpenCode sessions ran inside the current workspace roots. ` +
+        "Set includeAllDirectories:true to see sessions from other projects."
+    );
+  }
+
+  return envelope({
+    ok: true,
+    data: {
+      sessions: scoped.slice(0, limit),
+      returned: Math.min(scoped.length, limit),
+      scanned: all.length,
+      filteredToWorkspaceRoots: args.includeAllDirectories !== true
     },
     warnings
   });

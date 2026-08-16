@@ -1,6 +1,6 @@
 # OpenCode for Codex
 
-This plugin exposes ten `opencode_*` MCP tools for bounded OpenCode work, review, background lifecycle management, and privacy-filtered visible-thread transfer. The repository README contains installation and verification details; `src/server.ts` and tests define the machine contract.
+This plugin exposes eleven `opencode_*` MCP tools for bounded OpenCode work, review, background lifecycle management, and privacy-filtered visible-thread transfer. The repository README contains installation and verification details; `src/server.ts` and tests define the machine contract.
 
 ## Contract summary
 
@@ -18,6 +18,6 @@ Codex remains final owner. OpenCode must not commit, push, deploy, clean the wor
 
 ## Tools
 
-`opencode_check`, `opencode_run`, `opencode_continue`, `opencode_rescue`, `opencode_review`, `opencode_adversarial_review`, `opencode_transfer`, `opencode_status`, `opencode_result`, and `opencode_cancel`.
+`opencode_check`, `opencode_run`, `opencode_continue`, `opencode_rescue`, `opencode_review`, `opencode_adversarial_review`, `opencode_transfer`, `opencode_sessions`, `opencode_status`, `opencode_result`, and `opencode_cancel`.
 
 From the repository root, run `npm run check`, `npm run test:integration`, `npm run smoke:opencode-cli`, and `npm run smoke:background` before release. Live transfer remains opt-in through `npm run smoke:live-transfer` with an explicitly authorized `OPENCODE_MODEL`.

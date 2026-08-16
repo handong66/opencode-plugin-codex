@@ -155,6 +155,14 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 
 ### Added
 
+- **OC supplementary 3** New `opencode_sessions` tool. It lists recent OpenCode
+  sessions (`id`, `title`, `directory`, `updatedAt`, `createdAt`) from
+  `opencode session list --format json`, scoped to the caller's workspace roots
+  unless `includeAllDirectories: true`. 287 timed-out jobs kept neither a session id
+  nor a surviving log, and a caller that had lost its `jobId` had exactly one way
+  back to its own work: a raw `opencode` CLI call — the path behind the 2026-08-14
+  incident. A failing listing is `error.code: "session_listing_failed"`, not an empty
+  list.
 - **X3** `opencode_adversarial_review` accepts `threatModel`: the operating context
   findings are judged against, in the user's own words. Every finding is then
   labelled in-model or out-of-model, and an out-of-model finding is advisory only —

@@ -15,6 +15,7 @@ const requiredTools = [
   "opencode_review",
   "opencode_adversarial_review",
   "opencode_transfer",
+  "opencode_sessions",
   "opencode_status",
   "opencode_result",
   "opencode_cancel"

@@ -20,6 +20,7 @@ A boundary refusal is returned, not thrown: `workspace_unavailable`, `workspace_
 - Use `opencode_rescue`, `opencode_review`, or `opencode_adversarial_review` for read-only second-agent analysis.
 - Use `opencode_transfer` only when visible Codex conversation context is worth importing into OpenCode's local session database.
 - Manage background work with `opencode_status`, `opencode_result`, and `opencode_cancel` using only the returned `jobId`.
+- Recover a lost session or job handle with `opencode_sessions`, which lists recent OpenCode sessions (id, title, directory, updatedAt) scoped to the current workspace roots. Use it instead of a raw CLI call; pass `includeAllDirectories: true` only when the session belongs to another project.
 
 Never invoke the OpenCode CLI directly with exec or shell. If `opencode_check` cannot validate a workspace root, use its degraded diagnostics; a raw CLI call bypasses the model, permission, path, and job-record contracts entirely. The one recorded case of a direct `opencode run --model …` call created a session the plugin never saw and a provider 403 nothing in the plugin could explain.
 

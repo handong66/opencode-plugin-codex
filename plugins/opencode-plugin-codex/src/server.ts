@@ -15,6 +15,7 @@ import {
   opencodeRescue,
   opencodeReview,
   opencodeRun,
+  opencodeSessions,
   opencodeStatus,
   opencodeTransfer
 } from "./tools.js";
@@ -294,6 +295,35 @@ server.registerTool(
     }
   },
   (args, extra) => opencodeTransfer(withCodexWorkspaceRoots(args, extra._meta))
+);
+
+server.registerTool(
+  "opencode_sessions",
+  {
+    title: "List OpenCode Sessions",
+    description:
+      "List recent OpenCode sessions (id, title, directory, updatedAt) so a lost session or job handle can be " +
+      "recovered without calling the OpenCode CLI directly. Scoped to the current workspace roots by default.",
+    inputSchema: {
+      cwd: commonShape.cwd,
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe("How many sessions to return, most recently updated first. Default 20."),
+      includeAllDirectories: z
+        .boolean()
+        .optional()
+        .describe(
+          "Include sessions that ran outside the current workspace roots. Off by default: a session listing is a " +
+            "list of the user's own work, and recovery normally only needs this project."
+        )
+    },
+    annotations: READ_ONLY_ANNOTATIONS
+  },
+  (args, extra) => opencodeSessions(withCodexWorkspaceRoots(args, extra._meta))
 );
 
 server.registerTool(

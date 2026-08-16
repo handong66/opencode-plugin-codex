@@ -104,6 +104,13 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   complete buffers still feed `outputSummary` and the JSONL error detector, so
   diagnosis is unaffected — and `outputSummary.finalText` (OC-5) now carries the answer
   the tail no longer has to.
+- **OC-3 (foreground)** A foreground run (`background: false`) that spends its
+  wall-clock budget is now a failure. Success was decided by the exit code alone, so a
+  CLI that traps `SIGTERM` and exits 0 returned a discarded budget as `ok: true` with no
+  `errorClass`. The timeout and an externally delivered signal now come first, exactly as
+  they already did for background jobs: the response carries
+  `error: { code: "timeout", retryable: true }` and the resume advice in
+  `data.outputSummary.guidance`.
 - **OX4** OpenCode discovery is memoised for the life of the MCP server process, an
   explicitly configured binary (`opencodeBin`, `OPENCODE_BIN`) is trusted once it is
   executable instead of being gated on `--version`, and the probe budget rose from 5s to

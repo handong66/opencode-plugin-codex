@@ -561,7 +561,12 @@ async function runOrStartJob(params: {
     maxOutputChars: FOREGROUND_MAX_OUTPUT_CHARS
   });
   const structuredError = detectOpenCodeJsonlError(result.stdout, result.stderr);
-  const processSucceeded = result.exitCode === 0 && !structuredError;
+  // Same precedence as the background finalizer (§A OC-3.1): a spent budget and an
+  // externally delivered signal both outrank the exit code. Reading exitCode alone
+  // let a CLI that traps SIGTERM and exits 0 report a discarded budget as ok:true
+  // with no errorClass, so the caller never learned the session is resumable.
+  const processSucceeded =
+    result.exitCode === 0 && !result.timedOut && !result.signal && !structuredError;
   const completedAt = new Date().toISOString();
   const summaryRecord: JobRecord = {
     id: "job_foreground_summary",

@@ -28,6 +28,11 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   of a tail. The schema now accepts up to `1000000`, the store clamps to `1..100000`, and
   the response reports the effective `maxChars` and `maxCharsClamped`.
 
+- **X1** `opencode_review` and `opencode_adversarial_review` prompts now open with a
+  headless-delegation preamble telling OpenCode to ignore repository bootstrap
+  instructions that load interactive skills or personas, and not to narrate. 89 of 231
+  surviving job logs loaded a skill before starting the requested work.
+
 ### Added
 
 - **OC-2** `JobRecord.opencodeSessionId` is recovered from the job's own output when the

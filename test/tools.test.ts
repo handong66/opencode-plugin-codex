@@ -7,6 +7,7 @@ import {
   opencodeAdversarialReview,
   opencodeContinue,
   opencodeResult,
+  opencodeReview,
   opencodeRun,
   opencodeStatus,
   opencodeTransfer
@@ -781,5 +782,25 @@ describe("opencodeResult maxChars contract", () => {
 
     expect(result.maxChars).toBe(20_000);
     expect(result.maxCharsClamped).toBe(false);
+  });
+});
+
+describe("headless delegation preamble", () => {
+  test("tells a delegated review to ignore repository persona bootstrap", async () => {
+    await withFakeOpenCode(async () => {
+      const review = parseToolResult(
+        await opencodeReview({ cwd: process.cwd(), background: false, target: "one file" })
+      );
+      const adversarial = parseToolResult(
+        await opencodeAdversarialReview({ cwd: process.cwd(), background: false, target: "one file" })
+      );
+
+      for (const result of [review, adversarial]) {
+        const invocation = JSON.parse((result.stdout ?? "").trim()) as { input: string };
+        expect(invocation.input.startsWith("This is a headless, single-purpose delegation.")).toBe(true);
+        expect(invocation.input).toContain("load pua first");
+        expect(invocation.input).toContain("Do not narrate steps.");
+      }
+    });
   });
 });

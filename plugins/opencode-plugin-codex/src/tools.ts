@@ -346,16 +346,50 @@ async function validateRolloutFile(rolloutFile: string, cwd: string): Promise<st
   return resolvedFile;
 }
 
+const CODEX_PRIVATE_PATH_PATTERN = /(?:^|[\s"'`(])(?:~|\$HOME|\/[^\s"'`)]+)\/\.codex(?:\/|\b)/g;
+
+/** How much text around a hit is enough to find it in a 250,000-character prompt. */
+const PRIVATE_PATH_CONTEXT_CHARS = 40;
+const MAX_PRIVATE_PATH_HITS = 3;
+
+/**
+ * Show where the guard fired.
+ *
+ * This guard is correct and is not relaxed — it fired 28 times in the window,
+ * across seven projects — but it rejected the whole prompt without saying which
+ * span matched, so a caller with a 250,000-character prompt could only rebuild it,
+ * never edit it. The home directory is masked so the preview does not echo an
+ * absolute user path back into the transcript.
+ */
+function privatePathHits(prompt: string): { preview: string; index: number }[] {
+  const home = homedir();
+  const hits: { preview: string; index: number }[] = [];
+  for (const match of prompt.matchAll(CODEX_PRIVATE_PATH_PATTERN)) {
+    if (hits.length >= MAX_PRIVATE_PATH_HITS) break;
+    const index = match.index ?? 0;
+    const start = Math.max(0, index - PRIVATE_PATH_CONTEXT_CHARS);
+    const end = Math.min(prompt.length, index + match[0].length + PRIVATE_PATH_CONTEXT_CHARS);
+    const window = prompt.slice(start, end).replace(/\s+/g, " ").trim();
+    hits.push({
+      preview: `${start > 0 ? "…" : ""}${window.split(home).join("~")}${end < prompt.length ? "…" : ""}`,
+      index
+    });
+  }
+  return hits;
+}
+
 function validatePromptBoundary(prompt: string, allowCodexPrivatePaths?: boolean): void {
   if (allowCodexPrivatePaths) return;
 
-  const codexPrivatePathPattern = /(?:^|[\s"'`(])(?:~|\$HOME|\/[^\s"'`)]+)\/\.codex(?:\/|\b)/;
-  if (codexPrivatePathPattern.test(prompt)) {
+  const hits = privatePathHits(prompt);
+  if (hits.length) {
     throw new BoundaryError(
       "private_path_blocked",
       "Prompt asks OpenCode to read Codex private runtime paths such as ~/.codex. " +
+        `First match at character ${hits[0].index}: ${JSON.stringify(hits[0].preview)}. ` +
         "Inline the collaboration instructions in prompt, or use OpenCode-native skill paths under ~/.config/opencode/skills. " +
-        "Set allowCodexPrivatePaths only when the user explicitly authorizes that private path access."
+        "Set allowCodexPrivatePaths only when the user explicitly authorizes that private path access.",
+      { hits, promptChars: prompt.length }
     );
   }
 }

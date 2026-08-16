@@ -27,6 +27,30 @@ export type JobKind =
 
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
+/**
+ * A small, durable copy of how the job ended.
+ *
+ * Only 231 of 1,051 recorded jobs still had stdout, all of them from a six-day
+ * window: 78% of the history has a record and no output, and nothing in the code
+ * deletes logs, so they go by some other route. This audit's OC-2, OC-4 and OC-5
+ * work only existed because those 231 survived. Persisting the terminal facts on
+ * the record keeps a job diagnosable after its log is gone.
+ */
+export type TerminalSummary = {
+  state: JobOutputSummary["state"];
+  resultComplete: boolean;
+  /** Bounded copy of the answer; the log keeps the full text while it exists. */
+  finalTextPreview?: string;
+  finalTextTruncated: boolean;
+  permissionDenied: boolean;
+  deniedPaths: string[];
+  toolCallCount: number;
+  filesInspected: number;
+  turnsUsed: number;
+  evidenceLevel: JobOutputSummary["evidenceLevel"];
+  skillsLoaded: string[];
+};
+
 export type JobRecord = {
   id: string;
   kind: JobKind;
@@ -71,6 +95,8 @@ export type JobRecord = {
    */
   resumable?: boolean;
   cancelRequestedAt?: string;
+  /** How the job ended, kept on the record so it outlives the job's logs. */
+  terminalSummary?: TerminalSummary;
   outputTruncated?: boolean;
   stdoutPath: string;
   stderrPath: string;
@@ -106,6 +132,7 @@ export type PublicJobRecord = Pick<
   | "errorClass"
   | "errorMessage"
   | "cancelRequestedAt"
+  | "terminalSummary"
   | "outputTruncated"
 >;
 
@@ -129,6 +156,7 @@ const PUBLIC_JOB_FIELDS = [
   "errorClass",
   "errorMessage",
   "cancelRequestedAt",
+  "terminalSummary",
   "outputTruncated"
 ] as const satisfies readonly (keyof PublicJobRecord)[];
 
@@ -216,6 +244,29 @@ const MAX_DENIED_PATHS = 5;
 
 /** Budget for the returned final answer. Recorded answers: median 4,226, max 24,811. */
 const MAX_FINAL_TEXT_CHARS = 32_000;
+
+/** Budget for the copy kept on the record itself, which must stay small. */
+const MAX_PERSISTED_FINAL_TEXT_CHARS = 4_000;
+
+/** Build the durable terminal facts from a finished job's own summary. */
+export function toTerminalSummary(summary: JobOutputSummary): TerminalSummary {
+  return {
+    state: summary.state,
+    resultComplete: summary.resultComplete,
+    ...(summary.finalText
+      ? { finalTextPreview: summary.finalText.slice(0, MAX_PERSISTED_FINAL_TEXT_CHARS) }
+      : {}),
+    finalTextTruncated:
+      summary.finalTextTruncated || (summary.finalText ?? "").length > MAX_PERSISTED_FINAL_TEXT_CHARS,
+    permissionDenied: summary.permissionDenied,
+    deniedPaths: summary.deniedPaths,
+    toolCallCount: summary.toolCallCount,
+    filesInspected: summary.filesInspected,
+    turnsUsed: summary.turnsUsed,
+    evidenceLevel: summary.evidenceLevel,
+    skillsLoaded: summary.skillsLoaded
+  };
+}
 
 const MAX_SKILLS_LOADED = 10;
 

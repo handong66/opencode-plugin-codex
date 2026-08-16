@@ -262,3 +262,74 @@ describe("finalizeJobRecord on other outcomes", () => {
     expect(stdinFailure.errorMessage).toContain("stdin");
   });
 });
+
+describe("terminal summary persistence", () => {
+  test("keeps the answer, the evidence counters and the denial flag on the record", () => {
+    // 231 of 1,051 recorded jobs still had stdout, all from one six-day window: the
+    // other 78% have a record and nothing to read.
+    const stdout = [
+      JSON.stringify({ type: "step_start", sessionID: "ses_persist" }),
+      JSON.stringify({
+        type: "tool_use",
+        part: { type: "tool", tool: "read", state: { input: { filePath: "src/a.ts" } } }
+      }),
+      JSON.stringify({ type: "text", part: { type: "text", text: "Findings: one real bug in src/a.ts:12." } }),
+      JSON.stringify({ type: "step_finish", part: { type: "step_finish", reason: "stop" } })
+    ].join("\n");
+
+    const record = finalizeJobRecord({
+      record: baseRecord({ status: "running" }),
+      stdout,
+      stderr: "permission requested: read (/private/tmp/x); auto-rejecting",
+      outcome: { exitCode: 0, signal: null },
+      timedOut: false,
+      cancelRequested: false
+    });
+
+    expect(record.status).toBe("succeeded");
+    expect(record.terminalSummary?.state).toBe("succeeded_with_text");
+    expect(record.terminalSummary?.finalTextPreview).toBe("Findings: one real bug in src/a.ts:12.");
+    expect(record.terminalSummary?.toolCallCount).toBe(1);
+    expect(record.terminalSummary?.filesInspected).toBe(1);
+    expect(record.terminalSummary?.permissionDenied).toBe(true);
+    expect(record.terminalSummary?.deniedPaths).toEqual(["/private/tmp/x"]);
+    expect(record.opencodeSessionId).toBe("ses_persist");
+  });
+
+  test("bounds the persisted answer so records stay small", () => {
+    const answer = "z".repeat(9_000);
+    const stdout = [
+      JSON.stringify({ type: "step_start", sessionID: "ses_big" }),
+      JSON.stringify({ type: "text", part: { type: "text", text: answer } }),
+      JSON.stringify({ type: "step_finish", part: { type: "step_finish", reason: "stop" } })
+    ].join("\n");
+
+    const record = finalizeJobRecord({
+      record: baseRecord({ status: "running" }),
+      stdout,
+      stderr: "",
+      outcome: { exitCode: 0, signal: null },
+      timedOut: false,
+      cancelRequested: false
+    });
+
+    expect(record.terminalSummary?.finalTextPreview).toHaveLength(4_000);
+    expect(record.terminalSummary?.finalTextTruncated).toBe(true);
+  });
+
+  test("records the terminal state of a failure too", () => {
+    const record = finalizeJobRecord({
+      record: baseRecord({ status: "running" }),
+      stdout: JSON.stringify({ type: "step_start", sessionID: "ses_fail" }),
+      stderr: "boom",
+      outcome: { exitCode: 1, signal: null },
+      timedOut: false,
+      cancelRequested: false
+    });
+
+    expect(record.status).toBe("failed");
+    expect(record.terminalSummary?.state).toBe("failed_partial");
+    expect(record.terminalSummary?.resultComplete).toBe(false);
+    expect(record.terminalSummary?.evidenceLevel).toBe("none");
+  });
+});

@@ -3,7 +3,7 @@ import {
   detectOpenCodeJsonlError,
   openCodeFailureMessage
 } from "./opencode-cli.js";
-import { summarizeOpenCodeOutput, type JobRecord } from "./job-store.js";
+import { summarizeOpenCodeOutput, toTerminalSummary, type JobRecord } from "./job-store.js";
 
 /**
  * What the worker sends OpenCode when the tool-call ceiling is reached.
@@ -93,10 +93,18 @@ export function finalizeJobRecord(params: FinalizeJobParams): JobRecord {
   const summary = summarizeOpenCodeOutput(latest, stdout, stderr);
   latest.opencodeSessionId ??= summary.openCodeSessionId;
   const eventCount = Object.values(summary.eventCounts).reduce((total, count) => total + count, 0);
+  // 78% of recorded jobs have a record and no surviving output. Keep the terminal
+  // facts on the record so a job stays diagnosable once its log is gone. The
+  // summary is computed against the pre-terminal record, so the durable copy is
+  // rebuilt after each branch sets the final status.
+  const persistSummary = (record: JobRecord): JobRecord => {
+    record.terminalSummary = toTerminalSummary(summarizeOpenCodeOutput(record, stdout, stderr));
+    return record;
+  };
 
   if (latest.status === "cancelled" || latest.cancelRequestedAt || params.cancelRequested) {
     latest.status = "cancelled";
-    return latest;
+    return persistSummary(latest);
   }
 
   // A stall is not a spent budget: a run that produced nothing at all for the
@@ -113,7 +121,7 @@ export function finalizeJobRecord(params: FinalizeJobParams): JobRecord {
       `OpenCode produced no output for ${Math.round(params.stalled.silentMs / 1_000)}s and had emitted ` +
       `${eventCount} event(s) in total, so the run was ended early instead of holding the ${latest.timeoutMs}ms budget. ` +
       "This looks like a provider or model hang rather than slow work.";
-    return latest;
+    return persistSummary(latest);
   }
 
   if (params.timedOut) {
@@ -125,21 +133,21 @@ export function finalizeJobRecord(params: FinalizeJobParams): JobRecord {
         `The OpenCode session ${latest.opencodeSessionId} is still resumable.`
       : `OpenCode exceeded timeoutMs=${latest.timeoutMs} after producing ${eventCount} events, ` +
         "and no OpenCode session id was observed in its output, so the work cannot be resumed.";
-    return latest;
+    return persistSummary(latest);
   }
 
   if (outcome.error) {
     latest.status = "failed";
     latest.errorClass = "spawn_error";
     latest.errorMessage = outcome.error.message;
-    return latest;
+    return persistSummary(latest);
   }
 
   if (params.stdinError) {
     latest.status = "failed";
     latest.errorClass = "stdin_error";
     latest.errorMessage = `OpenCode did not accept the complete prompt on stdin: ${params.stdinError.message}`;
-    return latest;
+    return persistSummary(latest);
   }
 
   const structuredError = detectOpenCodeJsonlError(stdout, stderr);
@@ -147,7 +155,7 @@ export function finalizeJobRecord(params: FinalizeJobParams): JobRecord {
     latest.status = "failed";
     latest.errorClass = structuredError.errorClass;
     latest.errorMessage = structuredError.message;
-    return latest;
+    return persistSummary(latest);
   }
 
   latest.status = outcome.exitCode === 0 && !outcome.signal ? "succeeded" : "failed";
@@ -170,7 +178,7 @@ export function finalizeJobRecord(params: FinalizeJobParams): JobRecord {
       stderr
     });
   }
-  return latest;
+  return persistSummary(latest);
 }
 
 /** The provider's own words when we have them, our sentence when we do not. */

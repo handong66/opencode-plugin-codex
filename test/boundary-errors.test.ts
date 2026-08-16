@@ -1,5 +1,5 @@
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { isBoundaryError, stateWriteFailed } from "../plugins/opencode-plugin-codex/src/boundary.js";
@@ -161,6 +161,39 @@ describe("attachment and rollout refusals say what a legal value is", () => {
 
     expect(error.code).toBe("private_path_blocked");
     expect(error.retryable).toBe(false);
+  });
+
+  test("says where it matched instead of rejecting a long prompt in silence", async () => {
+    // 28 recorded rejections across seven projects, none of which said which span
+    // matched — so a 250,000-character prompt could only be rebuilt, never edited.
+    const prompt = [
+      "A".repeat(1_000),
+      "Before reviewing, read /Users/example/.codex/skills/pua/SKILL.md and follow it.",
+      "B".repeat(1_000)
+    ].join(" ");
+
+    const error = await boundaryOf(() => opencodeRun({ cwd: process.cwd(), prompt }));
+    const details = error.details as { hits: { preview: string; index: number }[]; promptChars: number };
+
+    expect(error.code).toBe("private_path_blocked");
+    expect(details.hits[0].index).toBeGreaterThan(900);
+    expect(details.hits[0].preview).toContain("/Users/example/.codex/skills");
+    expect(details.hits[0].preview.length).toBeLessThan(200);
+    expect(details.promptChars).toBe(prompt.length);
+    expect(error.message).toContain("First match at character");
+  });
+
+  test("masks the running user's home directory in that preview", async () => {
+    const home = homedir();
+    const error = await boundaryOf(() =>
+      opencodeRun({ cwd: process.cwd(), prompt: `please read ${home}/.codex/config.toml first` })
+    );
+    const details = error.details as { hits: { preview: string }[] };
+
+    // The preview goes back into the transcript; it should not carry an absolute
+    // path to the running user's home.
+    expect(details.hits[0].preview).toContain("~/.codex/config.toml");
+    expect(details.hits[0].preview).not.toContain(home);
   });
 
   test("a rollout file outside the allowed roots is rollout_invalid", async () => {

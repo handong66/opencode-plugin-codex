@@ -155,6 +155,18 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 
 ### Added
 
+- **OC supplementary 4** `private_path_blocked` now says where it matched: the
+  character offset plus a ~40-character window either side, with the running user's
+  home directory masked to `~`, and up to three hits in `error.details`. The guard is
+  correct and is not relaxed — it fired 28 times across seven projects — but it
+  rejected the whole prompt without ever saying which span matched, so a caller with
+  a 250,000-character prompt could only rebuild it, never edit it.
+- **OC supplementary 5** A job record now carries `terminalSummary`: the state,
+  `resultComplete`, a 4000-character copy of the final answer, `permissionDenied` and
+  `deniedPaths`, and the evidence counters. Only 231 of 1,051 recorded jobs still had
+  stdout — all of them from one six-day window — and this audit's OC-2, OC-4 and OC-5
+  only existed because those survived. The record now keeps enough to diagnose a job
+  after its log is gone, and `opencode_status` returns it.
 - **OX8** `opencode_transfer` no longer demands an explicit model. It was the last
   place carrying "an explicit authorized model is required" — the wording OC-7
   removed everywhere else because it is what pushes callers into passing unverified

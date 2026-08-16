@@ -101,7 +101,7 @@ Current Codex rollouts may contain injected user context in `response_item` reco
 
 Legacy response messages are used only when no visible event messages exist. System/developer messages, reasoning, and tool output are not transferred.
 
-An explicit rollout is path-contained before reading. Transfer requires an explicit authorized model, imports the generated session JSON, requires `Imported session: <id>`, then runs `opencode export <id> --sanitize` and verifies `info.id`.
+An explicit rollout is path-contained before reading. Transfer takes the same optional `model` as every other tool (`server.ts` hands it `commonShape.model`): omitting it falls back to OpenCode's configured default and reports `modelSelection`, and only a configuration that cannot be read at all is a refusal. It then imports the generated session JSON, requires `Imported session: <id>`, runs `opencode export <id> --sanitize`, and verifies `info.id`.
 
 If `runAfterImport` fails, the response keeps `opencodeSessionId`, sets `importSucceeded: true`, and makes overall `ok` reflect continuation failure.
 

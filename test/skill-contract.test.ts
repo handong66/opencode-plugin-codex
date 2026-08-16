@@ -75,6 +75,33 @@ describe("the shipped Skill cannot drift away from the code", () => {
     expect(references).toContain("failure-routing.md");
   });
 
+  test("no shipped document still demands an explicit model", async () => {
+    // The identifier check above cannot see prose, and prose is what Codex reads.
+    // OX8 made `model` optional everywhere (server.ts hands opencode_transfer the same
+    // optional commonShape.model, and only an unreadable configuration refuses), but the
+    // Skill kept the 0.1-era sentence "requires an explicit authorized model" — inside the
+    // same file that says `model` is optional two paragraphs earlier. A stale claim here
+    // re-creates the pressure toward unverified explicit models that OC-7 exists to remove.
+    const documents = [
+      join(SKILL_DIR, "SKILL.md"),
+      join(SKILL_DIR, "references/failure-routing.md"),
+      join(process.cwd(), "README.md"),
+      join(process.cwd(), "plugins/opencode-plugin-codex/README.md"),
+      join(process.cwd(), "docs/development.md")
+    ];
+    // Deliberately narrow: "a continuation requires a previously verified model" is the
+    // correct, surviving sentence. What must not come back is a claim that some tool
+    // demands an explicit model before it will run.
+    const demandsAModel =
+      /(?:requires?|needs?|must (?:pass|use|supply|provide))\s+an?\s+explicit[^.\n]{0,40}\bmodel\b|\bmodel`?\s+is\s+required\b/i;
+
+    for (const path of documents) {
+      const text = await readFile(path, "utf8");
+      const offender = text.split("\n").find((line) => demandsAModel.test(line));
+      expect(offender, `${path} still demands an explicit model: ${offender ?? ""}`).toBeUndefined();
+    }
+  });
+
   test("it names every failure class the code can produce", async () => {
     const routing = await readFile(join(SKILL_DIR, "references/failure-routing.md"), "utf8");
     const errorClasses = [

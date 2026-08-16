@@ -166,7 +166,11 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   vendored into the plugin as
   `skills/opencode/references/failure-routing.md`, so it ships and versions with the
   code that implements it, and `test/skill-contract.test.ts` fails the build when any
-  error code or result field named in the shipped Skill no longer exists in `src/`.
+  error code or result field named in the shipped Skill no longer exists in `src/` —
+  and, since it is the declared complete routing table, when `src` can return a code
+  the table does not list. The table now carries `worker_error`,
+  `provider_listing_failed`, `session_listing_failed`, `job_not_found` and the five
+  `opencode_transfer` refusal codes, which the first cut omitted.
   The previous release declared an out-of-repo Skill as its authority with nothing
   comparing the two — the mechanism behind the timeout dogma, and one that would have
   bitten the new error vocabulary and the typed envelope in exactly the same way.

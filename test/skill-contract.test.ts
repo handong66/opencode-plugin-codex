@@ -102,6 +102,45 @@ describe("the shipped Skill cannot drift away from the code", () => {
     }
   });
 
+  test("src cannot grow a code the routing table does not list", async () => {
+    // The docs→src direction alone is half a guard: nothing failed when src added
+    // `worker_error`, `provider_listing_failed`, `session_listing_failed` and the
+    // five transfer codes, and the file that calls itself the complete failure
+    // routing table silently stopped being one. This is the same drift mechanism,
+    // read the other way.
+    const routing = await readFile(join(SKILL_DIR, "references/failure-routing.md"), "utf8");
+    const files = (await readdir(SRC_DIR)).filter((file) => file.endsWith(".ts"));
+    const found = new Map<string, string>();
+
+    for (const file of files) {
+      const text = await readFile(join(SRC_DIR, file), "utf8");
+      const scans: { label: string; pattern: RegExp; scope?: string }[] = [
+        { label: "errorClass", pattern: /errorClass\s*[:=]\s*"([a-z][a-z_]*)"/g },
+        { label: "error.code", pattern: /\bcode:\s*"([a-z][a-z_]*)"/g },
+        { label: "BoundaryError", pattern: /new BoundaryError\(\s*"([a-z][a-z_]*)"/g },
+        // Every classifier answer becomes an `errorClass` somewhere downstream.
+        { label: "classifier", pattern: /return "([a-z][a-z_]*)";/g },
+        {
+          label: "BoundaryErrorCode",
+          pattern: /"([a-z][a-z_]*)"/g,
+          scope: /export type BoundaryErrorCode =([\s\S]*?);/.exec(text)?.[1]
+        }
+      ];
+      for (const { label, pattern, scope } of scans) {
+        if (scope === undefined && label === "BoundaryErrorCode") continue;
+        for (const match of (scope ?? text).matchAll(pattern)) {
+          if (!found.has(match[1])) found.set(match[1], `${file} (${label})`);
+        }
+      }
+    }
+
+    // Sanity: the scan itself must not silently stop finding anything.
+    expect(found.size).toBeGreaterThan(20);
+    for (const [code, where] of found) {
+      expect(routing, `${where} can return \`${code}\`, which failure-routing.md does not list`).toContain(code);
+    }
+  });
+
   test("it names every failure class the code can produce", async () => {
     const routing = await readFile(join(SKILL_DIR, "references/failure-routing.md"), "utf8");
     const errorClasses = [
@@ -129,7 +168,8 @@ describe("the shipped Skill cannot drift away from the code", () => {
       "rollout_invalid",
       "state_write_failed",
       "cli_not_found",
-      "cli_probe_timeout"
+      "cli_probe_timeout",
+      "job_not_found"
     ];
 
     for (const code of [...errorClasses, ...boundaryCodes]) {

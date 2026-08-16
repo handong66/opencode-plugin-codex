@@ -7,9 +7,10 @@ ask for a second review, how to run a handoff — lives in the Codex
 `codex-opencode-collaboration` Skill, not here.
 
 `test/skill-contract.test.ts` fails the build when a code or field named here no
-longer exists in `plugins/opencode-plugin-codex/src`. That test is the whole point
-of vendoring this file: the previous release had no way to notice that its declared
-authority had drifted away from the code.
+longer exists in `plugins/opencode-plugin-codex/src`, **and** when `src` learns a
+code this table does not list. That test is the whole point of vendoring this file:
+the previous release had no way to notice that its declared authority had drifted
+away from the code, in either direction.
 
 ## Every response
 
@@ -57,9 +58,24 @@ Returned, never thrown. All are `retryable: false` except `cli_probe_timeout`.
 | `terminated` | yes | Something outside OpenCode ended it. |
 | `opencode_failed` | yes | Generic non-zero exit; read `errorMessage`. |
 | `worker_unavailable` | yes | The background worker died without a terminal record. |
+| `worker_error` | yes | The worker itself threw — its own state write or log flush failed, not OpenCode. `errorMessage` carries the exception. Resubmit; if it repeats, run `opencode_check` for the state directory. |
 | `spawn_error` / `stdin_error` | yes | The process could not start, or the prompt was not delivered. |
 | `unknown` | yes | Wording the table did not recognise; the provider's full message is in `errorMessage`. |
 | `cancelled` | yes | `opencode_cancel` was called. Partial logs only. |
+
+## Tool refusals
+
+One tool's own failure, in the same envelope. These never appear as `errorClass`.
+
+| `code` | Retryable | Where | What to do |
+| --- | --- | --- | --- |
+| `provider_listing_failed` | yes | `opencode_check` | `opencode providers list` / `models <provider>` exited non-zero. The CLI's own text is in the message — `Provider not found: AIHubMix` means the provider id is wrong, not that the check failed. Never wrapped in `ok: true` any more. |
+| `session_listing_failed` | yes | `opencode_sessions` | `opencode session list` exited non-zero or returned unparseable JSON. Check the CLI with `opencode_check` before retrying. |
+| `codex_thread_missing` | no | `opencode_transfer` | No Codex rollout JSONL was found. Pass `rolloutFile`, or inline the context in `prompt` instead — usually cheaper than a transfer. |
+| `codex_transcript_empty` | no | `opencode_transfer` | The rollout has no visible user/assistant messages. Nothing to transfer. |
+| `opencode_model_required` | no | `opencode_transfer` | An imported session file has to name a model and OpenCode's configured default could not be read. Fix the configuration, or pass `model` for this call only. Every other tool falls back to the configured default. |
+| `opencode_import_failed` | yes | `opencode_transfer` | `opencode import` exited non-zero or never confirmed a session id. |
+| `opencode_import_verify_failed` | yes | `opencode_transfer` | The session imported but could not be read back, so the id is not trustworthy. Do not continue against it. |
 
 ## Which field is the answer
 

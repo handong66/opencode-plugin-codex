@@ -53,7 +53,7 @@ Every tool returns the same shape:
 
 `data` holds the payload (`job`, `record`, `stdout`, `stderr`, `outputSummary`, `workspace`, `effectiveModel`, `continuation`, …). Small scalars — `terminal`, `nextAction`, `waited`, `resumable`, `openCodeSessionId`, `errorClass`, `exitCode`, `maxChars`, `maxCharsClamped`, `view`, `modelSelection`, `background`, `importSucceeded` and friends — are also mirrored at the top level for the 0.2 transition; the bulk fields are not, because duplicating them is what 0.2.0 removed. Read results from MCP `structuredContent`: a payload above `8192` characters is not duplicated into the text block.
 
-Boundary refusals are returned, not thrown: a `cwd` outside the workspace roots comes back as `{ ok: false, error: { code: "workspace_out_of_bounds", retryable: false, details: { roots } } }`. The codes are `workspace_unavailable`, `workspace_out_of_bounds`, `file_attachment_invalid`, `private_path_blocked`, `rollout_invalid`, `state_write_failed`, `cli_not_found`, `cli_probe_timeout`, plus the `errorClass` vocabulary for OpenCode's own failures. On `opencode_status`, `opencode_result`, and `opencode_cancel`, `ok` describes the **job's** outcome, not the query's: a `failed` or `cancelled` job returns `ok: false` with `error: { code, message, retryable }`, and `terminal`/`nextAction` say whether the record can still change.
+Boundary refusals are returned, not thrown: a `cwd` outside the workspace roots comes back as `{ ok: false, error: { code: "workspace_out_of_bounds", retryable: false, details: { roots } } }`. The codes are `workspace_unavailable`, `workspace_out_of_bounds`, `file_attachment_invalid`, `private_path_blocked`, `rollout_invalid`, `state_write_failed`, `cli_not_found`, `cli_probe_timeout`, `job_not_found`, plus the `errorClass` vocabulary for OpenCode's own failures and the per-tool codes listed in `plugins/opencode-plugin-codex/skills/opencode/references/failure-routing.md`. On `opencode_status`, `opencode_result`, and `opencode_cancel`, `ok` describes the **job's** outcome, not the query's: a `failed` or `cancelled` job returns `ok: false` with `error: { code, message, retryable }`, and `terminal`/`nextAction` say whether the record can still change.
 
 ## Transfer privacy
 
@@ -112,7 +112,7 @@ The selected Codex orchestration Skill is intentionally not registered into Open
 ## Documentation authority
 
 - Plugin source and tests: machine behavior.
-- `plugins/opencode-plugin-codex/skills/opencode/references/failure-routing.md`: the vendored, version-bound failure-routing and polling contract. `test/skill-contract.test.ts` fails the build when it names a code or field that no longer exists in `src/`.
+- `plugins/opencode-plugin-codex/skills/opencode/references/failure-routing.md`: the vendored, version-bound failure-routing and polling contract. `test/skill-contract.test.ts` fails the build when it names a code or field that no longer exists in `src/`, and when `src/` can return a code it does not list.
 - `plugins/opencode-plugin-codex/skills/opencode/SKILL.md`: concise tool/parameter/safety guidance.
 - Dong-skills `codex-opencode-collaboration`: full orchestration, review, recovery, transfer, and acceptance workflow.
 - `docs/development.md`: current architecture and maintenance rules.

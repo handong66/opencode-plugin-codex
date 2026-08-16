@@ -6,7 +6,7 @@ This document describes the current implementation. Source and tests win if docu
 
 1. `plugins/opencode-plugin-codex/src/` and tests define machine behavior.
 2. `plugins/opencode-plugin-codex/skills/opencode/SKILL.md` briefly explains tools, parameters, finality, and safety.
-3. `plugins/opencode-plugin-codex/skills/opencode/references/failure-routing.md` is the vendored, version-bound failure-routing and polling contract. It ships inside the plugin so it can never be a release behind the code, and `test/skill-contract.test.ts` fails the build when it names an error code or result field that no longer exists in `src/`, or when any shipped document re-acquires a claim the code contradicts.
+3. `plugins/opencode-plugin-codex/skills/opencode/references/failure-routing.md` is the vendored, version-bound failure-routing and polling contract. It ships inside the plugin so it can never be a release behind the code, and `test/skill-contract.test.ts` fails the build when it names an error code or result field that no longer exists in `src/`, when `src/` can return a code it does not list (it is advertised as the complete table, so both directions are drift), or when any shipped document re-acquires a claim the code contradicts.
 4. Dong-skills `codex-opencode-collaboration` defines the full Codex-owned collaboration workflow. Its personal installed copy is synchronization output, not a second source.
 
 Do not copy the orchestration workflow into the plugin Skill or register the Codex orchestration Skill into OpenCode. Layer 4 lives outside this repository and is not version-bound to it: anything a caller must get right in the same release as a code change belongs in layer 3, not layer 4. That asymmetry is the drift mechanism behind the 0.1-era timeout dogma.

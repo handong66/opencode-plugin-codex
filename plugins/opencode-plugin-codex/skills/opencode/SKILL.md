@@ -11,9 +11,9 @@ Read results from MCP `structuredContent`. The text copy is compact, and a paylo
 
 Every tool returns one envelope: `{ ok, error?: { code, message, retryable, details? }, warnings: string[], data }`. The payload is in `data` — `job`, `record`, `stdout`, `stderr`, `outputSummary`, `workspace`, `effectiveModel`, `continuation`. Small scalars (`terminal`, `nextAction`, `waited`, `resumable`, `openCodeSessionId`, `errorClass`, `exitCode`, `maxChars`, `maxCharsClamped`, `view`, `modelSelection`, `background`, `importSucceeded`) are mirrored at the top level for the 0.2 transition; bulk fields are not.
 
-A boundary refusal is returned, not thrown: `workspace_unavailable`, `workspace_out_of_bounds` (which lists the roots that are available), `file_attachment_invalid`, `private_path_blocked`, `rollout_invalid`, `state_write_failed`, `cli_not_found`, `cli_probe_timeout`. All are `retryable: false` except `cli_probe_timeout`. Never work around one by calling the OpenCode CLI directly.
+A boundary refusal is returned, not thrown: `workspace_unavailable`, `workspace_out_of_bounds` (which lists the roots that are available), `file_attachment_invalid`, `private_path_blocked`, `rollout_invalid`, `state_write_failed`, `cli_not_found`, `cli_probe_timeout`, `job_not_found`. All are `retryable: false` except `cli_probe_timeout`. Never work around one by calling the OpenCode CLI directly.
 
-Full failure routing (every `errorClass` and boundary code, what to do about each) and the polling contract are in [references/failure-routing.md](references/failure-routing.md), which ships and versions with this plugin.
+Full failure routing (every `errorClass`, boundary code and per-tool refusal code, what to do about each) and the polling contract are in [references/failure-routing.md](references/failure-routing.md), which ships and versions with this plugin. A test fails the build in both directions: a code named there that no longer exists in `src`, and a code `src` can return that it does not list.
 
 ## Choose a tool
 

@@ -69,6 +69,14 @@ export type JobOutputSummary = {
   lastTextPreview?: string;
   sawToolUse: boolean;
   sawSubagentTask: boolean;
+  /**
+   * True when OpenCode asked for a permission it did not get. A job can exit 0 and
+   * still have inspected nothing, so this must be read before believing an empty
+   * finding set. All six recorded cases were `succeeded_without_text`.
+   */
+  permissionDenied: boolean;
+  /** The paths OpenCode was denied, capped so the summary stays small. */
+  deniedPaths: string[];
   errorClass?: string;
   errorMessagePreview?: string;
   guidance: string;
@@ -83,6 +91,23 @@ export type JobStoreOptions = {
 const WORKER_STARTUP_GRACE_MS = 2_000;
 const MAX_RESULT_CHARS = 100_000;
 const SUMMARY_READ_CHARS = 1_000_000;
+
+const MAX_DENIED_PATHS = 5;
+
+/** The literal line OpenCode writes to stderr when it auto-rejects a permission. */
+const AUTO_REJECT_PATTERN = /permission requested: (\w+) \(([^)]*)\); auto-rejecting/g;
+
+/** The message OpenCode puts on a tool part when the permission was refused. */
+const REJECTED_TOOL_STATE_PATTERN = /rejected permission/i;
+
+function collectDeniedPaths(stderr: string): string[] {
+  const paths: string[] = [];
+  for (const match of stderr.matchAll(AUTO_REJECT_PATTERN)) {
+    const path = (match[2] ?? "").trim();
+    paths.push(path || match[1]);
+  }
+  return paths;
+}
 
 function previewText(text: string): string {
   const singleLine = text.replace(/\s+/g, " ").trim();
@@ -155,6 +180,7 @@ export function summarizeOpenCodeOutput(record: JobRecord, stdout: string, stder
   let sawToolUse = false;
   let sawSubagentTask = false;
   const structuredError = detectOpenCodeJsonlError(stdout, stderr);
+  const deniedPaths = collectDeniedPaths(stderr);
 
   for (const line of stdout.split(/\r?\n/)) {
     if (!line.trim()) continue;
@@ -170,7 +196,13 @@ export function summarizeOpenCodeOutput(record: JobRecord, stdout: string, stder
       type?: string;
       sessionID?: string;
       reason?: string;
-      part?: { type?: string; text?: string; tool?: string; reason?: string };
+      part?: {
+        type?: string;
+        text?: string;
+        tool?: string;
+        reason?: string;
+        state?: { error?: unknown; input?: Record<string, unknown> };
+      };
     };
     const eventType = typedEvent.type ?? typedEvent.part?.type ?? "unknown";
     eventCounts[eventType] = (eventCounts[eventType] ?? 0) + 1;
@@ -186,6 +218,14 @@ export function summarizeOpenCodeOutput(record: JobRecord, stdout: string, stder
     if (eventType === "tool_use" || typedEvent.part?.type === "tool") {
       sawToolUse = true;
       if (typedEvent.part?.tool === "task") sawSubagentTask = true;
+      const state = typedEvent.part?.state;
+      if (typeof state?.error === "string" && REJECTED_TOOL_STATE_PATTERN.test(state.error)) {
+        const input = state.input ?? {};
+        const path = [input.path, input.filePath, input.command].find(
+          (value): value is string => typeof value === "string" && value.trim().length > 0
+        );
+        deniedPaths.push(path ?? typedEvent.part?.tool ?? "unknown target");
+      }
     }
     if (eventType === "text" && typeof typedEvent.part?.text === "string" && typedEvent.part.text.trim()) {
       lastObservedText = typedEvent.part.text;
@@ -214,6 +254,7 @@ export function summarizeOpenCodeOutput(record: JobRecord, stdout: string, stder
   else state = "running_partial";
 
   const resultComplete = state === "succeeded_with_text";
+  const boundedDeniedPaths = deniedPaths.slice(0, MAX_DENIED_PATHS);
   let guidance: string;
   if (resultComplete) {
     guidance = "OpenCode produced final text. Codex must still verify findings against the workspace before acting on them.";
@@ -243,6 +284,18 @@ export function summarizeOpenCodeOutput(record: JobRecord, stdout: string, stder
   } else {
     guidance = "OpenCode exited successfully but no final assistant text was observed. Rerun with a narrower target and an explicit findings-only output contract.";
   }
+  // Six of six recorded succeeded_without_text jobs were permission auto-rejections,
+  // and none of them had asked for --auto. The generic "rerun with a narrower target"
+  // advice made the caller shrink the scope of a job that had inspected nothing.
+  if (deniedPaths.length) {
+    const denial =
+      `OpenCode was denied ${deniedPaths.length} permission(s) for ${boundedDeniedPaths.join(", ")}. ` +
+      "It exited cleanly but could not inspect what it needed, so absence of findings is NOT evidence of correctness. " +
+      "First choose a cwd that already contains those paths. Only if that is impossible, and only with the user's " +
+      "explicit approval, retry with autoApprovePermissions:true — OpenCode --auto also approves writes, so do not " +
+      "use it for a read-only review.";
+    guidance = state === "succeeded_without_text" ? denial : `${denial} ${guidance}`;
+  }
   if (!resultComplete && sawSubagentTask) {
     guidance += " A subagent task call was observed, which often indicates the prompt widened beyond a bounded second-pass review.";
   }
@@ -258,6 +311,8 @@ export function summarizeOpenCodeOutput(record: JobRecord, stdout: string, stder
       : undefined,
     sawToolUse,
     sawSubagentTask,
+    permissionDenied: deniedPaths.length > 0,
+    deniedPaths: boundedDeniedPaths,
     errorClass: structuredError?.errorClass ?? record.errorClass,
     errorMessagePreview: structuredError?.message
       ? previewText(structuredError.message)

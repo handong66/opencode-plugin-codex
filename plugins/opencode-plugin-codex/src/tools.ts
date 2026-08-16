@@ -315,6 +315,7 @@ export async function opencodeContinue(args: CommonArgs & {
   fork?: boolean;
   background?: boolean;
   timeoutMs?: number;
+  autoApprovePermissions?: boolean;
 }) {
   return runOrStartJob({ ...args, kind: "continue" });
 }
@@ -323,6 +324,7 @@ export async function opencodeRescue(args: CommonArgs & {
   problem: string;
   background?: boolean;
   timeoutMs?: number;
+  autoApprovePermissions?: boolean;
 }) {
   const prompt = [
     "You are OpenCode acting as an independent rescue reviewer for a Codex task.",

@@ -6,6 +6,7 @@ import { JobStore } from "../plugins/opencode-plugin-codex/src/job-store.js";
 import {
   opencodeAdversarialReview,
   opencodeContinue,
+  opencodeRescue,
   opencodeResult,
   opencodeReview,
   opencodeRun,
@@ -294,6 +295,34 @@ describe("opencodeRun", () => {
 
       expect(invocation.input).toContain("~/.codex/private/runtime.json");
       expect(invocation.args).not.toContain("--auto");
+    });
+  });
+
+  test("lets continue and rescue request permission approval too", async () => {
+    // Four of the six recorded auto-rejections were kinds that had no way to ask.
+    await withFakeOpenCode(async () => {
+      const continued = parseToolResult(
+        await opencodeContinue({
+          cwd: process.cwd(),
+          background: false,
+          sessionId: "ses_permission",
+          autoApprovePermissions: true,
+          prompt: "Continue and finish."
+        })
+      );
+      const rescued = parseToolResult(
+        await opencodeRescue({
+          cwd: process.cwd(),
+          background: false,
+          autoApprovePermissions: true,
+          problem: "The build fails outside the worktree."
+        })
+      );
+
+      for (const result of [continued, rescued]) {
+        const invocation = JSON.parse((result.stdout ?? "").trim()) as { args: string[] };
+        expect(invocation.args).toContain("--auto");
+      }
     });
   });
 

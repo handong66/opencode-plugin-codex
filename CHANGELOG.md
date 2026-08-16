@@ -49,6 +49,11 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   `ETIMEDOUT`, …).
 - **OC-3** Every failed job now carries an `errorMessage`. The generic non-zero-exit
   branch previously set a class and no message.
+- **OC-4** `outputSummary.guidance` for a permission-denied job replaces "rerun with a
+  narrower target" (which shrank the scope of a job that had inspected nothing) with the
+  denied paths, a statement that absence of findings is not evidence of correctness, and
+  the cheap remedy first: choose a `cwd` that contains those paths, and only then, with
+  the user's explicit approval, `autoApprovePermissions`.
 - **OC-3** `outputSummary.guidance` for a non-retryable failure (`quota_exhausted`,
   `auth_required`, `model_unauthorized`, `model_not_found`) says what to do instead of
   retrying, rather than "rerun with a narrower prompt".
@@ -60,6 +65,15 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 
 ### Added
 
+- **OC-4** `outputSummary.permissionDenied` and `outputSummary.deniedPaths` (capped at 5)
+  report permissions OpenCode asked for and did not get, read from the
+  `permission requested: <tool> (<path>); auto-rejecting` stderr lines and from rejected
+  tool states in the JSONL stream. All six recorded `succeeded_without_text` jobs were
+  this, and none of them had asked for `--auto`.
+- **OC-4** `opencode_continue` and `opencode_rescue` now accept `autoApprovePermissions`.
+  Four of the six recorded auto-rejections were kinds that had no way to ask for it.
+  `opencode_review` and `opencode_adversarial_review` still do not accept it: their
+  prompts end with "Stay read-only" and OpenCode's `--auto` also approves writes.
 - **OC-3** New `errorClass` values: `quota_exhausted`, `model_not_found`, `auth_required`,
   `rate_limited`, and `terminated`. The first four were previously reported as
   `model_unauthorized` or `opencode_failed`; `terminated` covers a job ended by a signal,

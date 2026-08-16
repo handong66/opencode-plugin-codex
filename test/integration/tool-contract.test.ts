@@ -97,6 +97,20 @@ describe("published tool schemas", () => {
     expect(JSON.stringify(response.content)).toMatch(/10000/);
   });
 
+  test("offers permission approval where work happens and withholds it from read-only reviews", async () => {
+    const client = await connect();
+
+    for (const toolName of ["opencode_run", "opencode_continue", "opencode_rescue"]) {
+      const property = (await toolProperties(client, toolName)).autoApprovePermissions;
+      expect(property, toolName).toBeDefined();
+      expect(property.description ?? "", toolName).toMatch(/cwd/);
+    }
+    // Both review prompts end with "Stay read-only" while --auto also approves writes.
+    for (const toolName of ["opencode_review", "opencode_adversarial_review"]) {
+      expect((await toolProperties(client, toolName)).autoApprovePermissions, toolName).toBeUndefined();
+    }
+  });
+
   test("documents the maxChars clamp instead of hard-refusing a larger window", async () => {
     const client = await connect();
     const maxChars = (await toolProperties(client, "opencode_result")).maxChars;

@@ -67,6 +67,20 @@ const commonShape = {
 
 const jobIdSchema = z.string().regex(/^job_[A-Za-z0-9_-]{1,128}$/);
 
+/**
+ * Exposed on run/continue/rescue. Not exposed on the two review tools: their prompts
+ * end with "Stay read-only" while OpenCode's own `--auto` also approves writes, so a
+ * review that needs wider access has to become an explicit opencode_run.
+ */
+const autoApprovePermissionsSchema = z
+  .boolean()
+  .optional()
+  .describe(
+    "Use OpenCode --auto to auto-approve permission prompts while still respecting explicit deny rules. " +
+      "Prefer a cwd that already contains the paths OpenCode needs: --auto also approves writes. " +
+      "Only set this with the user's explicit approval."
+  );
+
 server.registerTool(
   "opencode_check",
   {
@@ -102,7 +116,7 @@ server.registerTool(
       title: z.string().min(1).max(1_024).optional(),
       background: z.boolean().optional(),
       timeoutMs: timeoutSchema,
-      autoApprovePermissions: z.boolean().optional().describe("Use OpenCode --auto to auto-approve permission prompts while still respecting explicit deny rules."),
+      autoApprovePermissions: autoApprovePermissionsSchema,
       allowCodexPrivatePaths: z.boolean().optional().describe("Allow prompt references to Codex private runtime paths. Does not change OpenCode permission handling."),
       dangerouslySkipPermissions: z.boolean().optional().describe("Deprecated compatibility alias for autoApprovePermissions. Does not allow Codex private paths.")
     }
@@ -121,7 +135,8 @@ server.registerTool(
       prompt: z.string().min(1).max(250_000).describe("Task instructions or message to send to OpenCode."),
       fork: z.boolean().optional(),
       background: z.boolean().optional(),
-      timeoutMs: timeoutSchema
+      timeoutMs: timeoutSchema,
+      autoApprovePermissions: autoApprovePermissionsSchema
     }
   },
   (args, extra) => opencodeContinue(withCodexWorkspaceRoots(args, extra._meta))
@@ -136,7 +151,8 @@ server.registerTool(
       ...commonShape,
       problem: z.string().min(1).max(250_000),
       background: z.boolean().optional(),
-      timeoutMs: timeoutSchema
+      timeoutMs: timeoutSchema,
+      autoApprovePermissions: autoApprovePermissionsSchema
     }
   },
   (args, extra) => opencodeRescue(withCodexWorkspaceRoots(args, extra._meta))

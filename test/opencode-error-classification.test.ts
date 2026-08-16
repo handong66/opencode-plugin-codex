@@ -73,6 +73,49 @@ describe("classification channels", () => {
   test("a clean exit with nothing on any error channel is unknown, not a failure verdict", () => {
     expect(classifyOpenCodeFailure(processResult({ exitCode: 0 }))).toBe("unknown");
   });
+
+  test("a bare CLI suggestion is not a missing model", () => {
+    // A version drift, not a model problem: the CLI is telling the caller a flag is
+    // misspelled. `did you mean` alone used to file it as model_not_found, which is
+    // non-retryable and comes with advice about checking the model spelling.
+    const result = processResult({ stderr: "error: unknown option '--formatt'. Did you mean --format?\n" });
+
+    expect(classifyOpenCodeFailure(result)).toBe("opencode_failed");
+    expect(isRetryableOpenCodeFailure("opencode_failed")).toBe(true);
+  });
+
+  test("a bare mention of billing is not an exhausted account", () => {
+    // A configuration notice, not a spent balance. `billing` alone used to file it as
+    // quota_exhausted — non-retryable, with advice to top up an account that is fine.
+    const result = processResult({
+      stderr: "warning: update your billing address in the provider console\n"
+    });
+
+    expect(classifyOpenCodeFailure(result)).toBe("opencode_failed");
+    expect(isRetryableOpenCodeFailure("opencode_failed")).toBe(true);
+  });
+
+  test("the real quota and model signals still classify", () => {
+    expect(classifyOpenCodeFailure(processResult({ stderr: "402 Payment Required" }))).toBe("quota_exhausted");
+    expect(
+      classifyOpenCodeFailure(processResult({ stderr: "insufficient credit for this request" }))
+    ).toBe("quota_exhausted");
+    expect(classifyOpenCodeFailure(processResult({ stderr: "Model not found: aihubmix/nope" }))).toBe(
+      "model_not_found"
+    );
+    expect(classifyOpenCodeFailure(processResult({ stderr: "no such model" }))).toBe("model_not_found");
+  });
+
+  test("an unstructured provider error with only a suggestion degrades to unknown", () => {
+    // Same phrases, arriving through the structured JSONL path with no statusCode:
+    // classifyOpenCodeErrorText is its fallback too.
+    const detected = detectOpenCodeJsonlError(
+      apiErrorLine({ message: "Unrecognised parameter. Did you mean 'temperature'? Contact billing support." })
+    );
+
+    expect(detected?.errorClass).toBe("unknown");
+    expect(detected?.message).toContain("Did you mean");
+  });
 });
 
 describe("structured provider errors", () => {

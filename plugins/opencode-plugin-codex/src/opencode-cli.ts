@@ -401,15 +401,23 @@ export function classifyOpenCodeStatusCode(statusCode: number | undefined): stri
 export function classifyOpenCodeErrorText(value: string): string | undefined {
   const text = value.toLowerCase();
   if (!text.trim()) return undefined;
+  // No bare `billing` and no bare `did you mean`. Both classes are non-retryable, so
+  // either word alone converted an ordinary retryable failure into a do-not-retry
+  // verdict: a CLI usage line ("Unknown flag. Did you mean --format?") after a
+  // version drift was filed as a misspelled model, and any billing-configuration
+  // notice as an exhausted account. Wording drift must degrade to `unknown` plus the
+  // full text (OC-3.2), never into a fabricated class. The unambiguous signals — the
+  // statusCodes, "payment required", "insufficient credit", "model not found" —
+  // carry these classes on their own.
   if (
-    /quota exhausted|balance exhausted|usage limit exceeded|insufficient (?:credit|credits|quota|balance)|payment required|billing/.test(
+    /quota exhausted|balance exhausted|usage limit exceeded|insufficient (?:credit|credits|quota|balance)|payment required/.test(
       text
     )
   ) {
     return "quota_exhausted";
   }
   if (/rate limit|too many requests|\b429\b/.test(text)) return "rate_limited";
-  if (/model not found|no such model|unknown model|provider not found|did you mean/.test(text)) {
+  if (/model not found|no such model|unknown model|provider not found/.test(text)) {
     return "model_not_found";
   }
   if (

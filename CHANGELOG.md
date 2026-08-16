@@ -137,7 +137,13 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   the provider message (for example `Did you mean: aihubmix?`) is passed through verbatim.
 - **OC-3** A bare `"timeout"` substring in an error stream is no longer `network_error`;
   transport failures are matched by their own tokens (`ECONNREFUSED`, `ENOTFOUND`,
-  `ETIMEDOUT`, …).
+  `ETIMEDOUT`, …). For the same reason a bare `"billing"` is no longer
+  `quota_exhausted` and a bare `"did you mean"` is no longer `model_not_found`: both
+  classes are non-retryable, so a CLI usage line (`Unknown option. Did you mean
+  --format?`) or a billing-configuration notice turned an ordinary retryable failure
+  into a do-not-retry verdict. The unambiguous signals still classify — statusCode
+  402/404, `payment required`, `insufficient credit`, `model not found`, `no such
+  model`, `unknown model`, `provider not found`.
 - **OC-3** Every failed job now carries an `errorMessage`. The generic non-zero-exit
   branch previously set a class and no message.
 - **OC-5** A step's text parts are joined instead of overwritten, so a final answer split

@@ -862,14 +862,24 @@ async function opencodeTransferImpl(args: TransferArgs) {
     });
   }
 
-  if (!args.model) {
+  // The imported session file has to name a model, but demanding one from the
+  // caller is the wording OC-7 removed everywhere else: it is what pushes callers
+  // into passing an unverified explicit model. OpenCode's own configured default is
+  // used when the caller omits it, and only a configuration we cannot read is a
+  // refusal.
+  const configured = await probeEffectiveModel({ opencodeBin: discovered.bin, cwd });
+  const selection = describeModelSelection({ requested: args.model, probe: configured });
+  warnings.push(...selection.warnings);
+  const model = args.model ?? selection.modelSelection.configured;
+  if (!model) {
     return envelope({
       ok: false,
       error: {
         code: "opencode_model_required",
         message:
-          "opencode_transfer requires an explicit authorized model. " +
-          "The plugin does not choose a provider/model default because model access is user-specific.",
+          "The imported session file has to name a model, and OpenCode's configured default could not be read " +
+          "(run opencode_check to see effectiveModel). Pass model explicitly for this call, or fix the OpenCode " +
+          "configuration so the default is readable.",
         retryable: false
       },
       warnings
@@ -880,7 +890,7 @@ async function opencodeTransferImpl(args: TransferArgs) {
     idSuffix: `${Date.now()}`,
     cwd,
     title: args.title ?? "Codex transferred session",
-    model: args.model,
+    model,
     opencodeVersion: discovered.version
   });
 
@@ -957,6 +967,8 @@ async function opencodeTransferImpl(args: TransferArgs) {
       prompt: continuePrompt,
       cwd,
       model: args.model,
+      // The continuation reuses the caller's explicit model only; omitting it keeps
+      // OpenCode on its own configured default, exactly as every other kind does.
       sessionId: opencodeSessionId,
       background: args.background ?? true,
       trustedOpenCodeBin: discovered.bin
@@ -977,7 +989,8 @@ async function opencodeTransferImpl(args: TransferArgs) {
         importedMessages: transcript.length,
         source: "codex-jsonl",
         rolloutFile,
-        model: splitModel(args.model),
+        model: splitModel(model),
+        modelSelection: selection.modelSelection,
         continuation
       },
       warnings
@@ -992,7 +1005,8 @@ async function opencodeTransferImpl(args: TransferArgs) {
       importedMessages: transcript.length,
       source: "codex-jsonl",
       rolloutFile,
-      model: splitModel(args.model)
+      model: splitModel(model),
+      modelSelection: selection.modelSelection
     },
     warnings
   });

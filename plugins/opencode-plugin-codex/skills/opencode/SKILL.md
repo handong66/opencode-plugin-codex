@@ -18,7 +18,7 @@ A boundary refusal is returned, not thrown: `workspace_unavailable`, `workspace_
 - Diagnose availability with `opencode_check`.
 - Start bounded work with `opencode_run`; continue a known session with `opencode_continue`.
 - Use `opencode_rescue`, `opencode_review`, or `opencode_adversarial_review` for read-only second-agent analysis.
-- Use `opencode_transfer` only when visible Codex conversation context is worth importing into OpenCode's local session database.
+- Use `opencode_transfer` only when the user explicitly asks to hand a long conversation over to OpenCode, or when a follow-up session genuinely needs the earlier turns. It is worth its cost only when the context is longer than you would paste into a prompt and the same OpenCode session will keep working from it; for anything smaller, inline the relevant part into an `opencode_run` prompt instead — that is cheaper and keeps the Codex private rollout file out of the picture. `model` is optional and defaults to OpenCode's configured model.
 - Manage background work with `opencode_status`, `opencode_result`, and `opencode_cancel` using only the returned `jobId`.
 - Recover a lost session or job handle with `opencode_sessions`, which lists recent OpenCode sessions (id, title, directory, updatedAt) scoped to the current workspace roots. Use it instead of a raw CLI call; pass `includeAllDirectories: true` only when the session belongs to another project.
 

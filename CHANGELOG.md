@@ -155,6 +155,15 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 
 ### Added
 
+- **OX8** `opencode_transfer` no longer demands an explicit model. It was the last
+  place carrying "an explicit authorized model is required" — the wording OC-7
+  removed everywhere else because it is what pushes callers into passing unverified
+  models — and it now falls back to OpenCode's configured default, reporting
+  `modelSelection` like every other tool. Only an unreadable configuration is a
+  refusal, and the message says to run `opencode_check`. The tool description also
+  states plainly that this is an opt-in path: zero calls in two months of recorded
+  traffic, it reads a Codex private rollout file, and inlining the relevant context
+  into an `opencode_run` prompt is usually cheaper.
 - **OC supplementary 3** New `opencode_sessions` tool. It lists recent OpenCode
   sessions (`id`, `title`, `directory`, `updatedAt`, `createdAt`) from
   `opencode session list --format json`, scoped to the caller's workspace roots

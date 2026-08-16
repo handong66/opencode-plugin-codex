@@ -56,9 +56,11 @@ Boundary refusals are returned, not thrown: a `cwd` outside the workspace roots 
 
 ## Transfer privacy
 
-`opencode_transfer` imports visible user/assistant text into OpenCode's local session database. For current Codex rollouts it prefers `event_msg.user_message` and `event_msg.agent_message`, avoiding injected response-item context; legacy response messages are fallback only. It does not transfer system/developer messages, reasoning, or tool output.
+`opencode_transfer` is opt-in and rarely the right tool: it was not called once in two months of recorded traffic, it reads a Codex private rollout file, and inlining the relevant context into an `opencode_run` prompt is usually cheaper and keeps the boundary narrower. Use it when the user explicitly asks to hand a long conversation over, or when a follow-up session genuinely needs the earlier turns.
 
-An explicit authorized `model` is required. An explicit rollout must resolve inside an MCP client workspace root or the Codex sessions directory. Import is successful only when OpenCode returns a session ID and `opencode export --sanitize` reads that session back. If an optional continuation then fails, the response preserves `opencodeSessionId`, sets `importSucceeded: true`, and reports overall `ok: false`. A background continuation reports `continuationStarted: true` and `continuationResultComplete: false`; use its job result to establish finality.
+It imports visible user/assistant text into OpenCode's local session database. For current Codex rollouts it prefers `event_msg.user_message` and `event_msg.agent_message`, avoiding injected response-item context; legacy response messages are fallback only. It does not transfer system/developer messages, reasoning, or tool output.
+
+`model` is optional and falls back to OpenCode's configured default, reported as `modelSelection`; only a configuration that cannot be read is a refusal. An explicit rollout must resolve inside an MCP client workspace root or the Codex sessions directory. Import is successful only when OpenCode returns a session ID and `opencode export --sanitize` reads that session back. If an optional continuation then fails, the response preserves `opencodeSessionId`, sets `importSucceeded: true`, and reports overall `ok: false`. A background continuation reports `continuationStarted: true` and `continuationResultComplete: false`; use its job result to establish finality.
 
 ## Requirements and CLI discovery
 

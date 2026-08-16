@@ -1005,3 +1005,48 @@ describe("adversarial review threat model", () => {
     });
   });
 });
+
+describe("opencodeTransfer model default", () => {
+  test("falls back to OpenCode's configured model instead of demanding one", async () => {
+    const binDir = await mkdtemp(join(tmpdir(), "opencode-plugin-codex-transfer-default-"));
+    const previous = process.env.OPENCODE_BIN;
+    try {
+      const bin = join(binDir, "fake-transfer-opencode.mjs");
+      await writeFile(
+        bin,
+        [
+          "#!/usr/bin/env node",
+          "import { writeFileSync } from 'node:fs';",
+          "if (process.argv[2] === '--version') console.log('1.18.16');",
+          "else if (process.argv[2] === 'debug') console.log(JSON.stringify({ model: 'aihubmix/claude-opus-4-6' }));",
+          "else if (process.argv[2] === 'import') { writeFileSync(process.env.FAKE_IMPORT_COPY, process.argv[3]); console.log('Imported session: ses_default_model'); }",
+          "else if (process.argv[2] === 'export') console.log(JSON.stringify({ info: { id: 'ses_default_model' }, messages: [] }));"
+        ].join("\n")
+      );
+      await chmod(bin, 0o755);
+      process.env.OPENCODE_BIN = bin;
+      process.env.FAKE_IMPORT_COPY = join(binDir, "import-path.txt");
+
+      const result = parseToolResult(
+        await opencodeTransfer({
+          cwd: process.cwd(),
+          rolloutFile: join(process.cwd(), "test/fixtures/codex-rollout-current-visible.jsonl")
+        })
+      ) as ReturnType<typeof parseToolResult> & {
+        model?: { providerID: string; modelID: string };
+        modelSelection?: { source: string };
+      };
+
+      // "An explicit authorized model is required" was the wording OC-7 removed
+      // everywhere else, and this tool is where it survived.
+      expect(result.ok).toBe(true);
+      expect(result.model?.providerID).toBe("aihubmix");
+      expect(result.modelSelection?.source).toBe("opencode_config");
+    } finally {
+      if (previous === undefined) delete process.env.OPENCODE_BIN;
+      else process.env.OPENCODE_BIN = previous;
+      delete process.env.FAKE_IMPORT_COPY;
+      await rm(binDir, { recursive: true, force: true });
+    }
+  });
+});

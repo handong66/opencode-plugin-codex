@@ -12,7 +12,7 @@ This plugin exposes eleven `opencode_*` MCP tools for bounded OpenCode work, rev
 - On `opencode_status`, `opencode_result`, and `opencode_cancel`, `ok` mirrors the job's outcome, and `terminal`/`nextAction` say whether the record can still change.
 - `maxToolCalls` bounds investigation instead of wall time; reaching it triggers a final-answer pass in the same session rather than a kill.
 - `autoApprovePermissions` maps to OpenCode `--auto` on run/continue/rescue only. Private Codex paths require separate explicit `allowCodexPrivatePaths` authorization.
-- Transfer prefers visible Codex `event_msg` user/assistant text, requires an explicit authorized model, verifies import by export readback, preserves partial-success details when continuation fails, and distinguishes a started background continuation from a complete result.
+- Transfer is opt-in (zero recorded uses; inlining context into a prompt is usually cheaper) and reads a Codex private rollout file. It prefers visible Codex `event_msg` user/assistant text, defaults `model` to OpenCode's configured default, verifies import by export readback, preserves partial-success details when continuation fails, and distinguishes a started background continuation from a complete result.
 
 Codex remains final owner. OpenCode must not commit, push, deploy, clean the worktree, read hidden Codex context, or replace local verification.
 

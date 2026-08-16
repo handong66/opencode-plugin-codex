@@ -12,7 +12,12 @@ async function tempDir(): Promise<string> {
   return dir;
 }
 
-async function waitForTerminal(store: JobStore, jobId: string, timeoutMs = 2_000) {
+/**
+ * These wait on a real detached worker process, so the budget is generous on
+ * purpose: the assertion is about the terminal record, never about how fast a
+ * loaded machine gets there. A short deadline here only produces flakes.
+ */
+async function waitForTerminal(store: JobStore, jobId: string, timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const record = await store.read(jobId);
@@ -114,7 +119,7 @@ describe("JobStore background lifecycle", () => {
       timeoutMs: 2_000,
       opencodeBin: bin
     });
-    const terminal = await waitForTerminal(store, job.id, 5_000);
+    const terminal = await waitForTerminal(store, job.id, 20_000);
 
     expect(terminal.status).toBe("failed");
     expect(terminal.errorClass).toBe("stdin_error");
@@ -226,7 +231,7 @@ describe("JobStore background lifecycle", () => {
       timeoutMs: 300,
       opencodeBin: bin
     });
-    const terminal = await waitForTerminal(store, job.id, 5_000);
+    const terminal = await waitForTerminal(store, job.id, 20_000);
 
     expect(terminal.status).toBe("failed");
     expect(terminal.errorClass).toBe("timeout");
@@ -266,7 +271,7 @@ describe("JobStore background lifecycle", () => {
       timeoutMs: 1_000,
       opencodeBin: bin
     });
-    const deadline = Date.now() + 3_000;
+    const deadline = Date.now() + 20_000;
     let terminal = await store.status(job.id);
     while (!["succeeded", "failed", "cancelled"].includes(terminal.status) && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 25));

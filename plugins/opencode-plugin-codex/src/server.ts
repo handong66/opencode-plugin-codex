@@ -280,10 +280,15 @@ server.registerTool(
   "opencode_transfer",
   {
     title: "Transfer Codex Thread To OpenCode",
-    description: "Convert a Codex rollout transcript into an OpenCode session and import it.",
+    description:
+      "Convert a Codex rollout transcript into an OpenCode session and import it. " +
+      "Opt-in and rarely the right tool: it was not called once in two months of recorded traffic, and inlining the " +
+      "relevant context into an opencode_run prompt is cheaper and keeps the boundary narrower. Use it only when the " +
+      "user explicitly asks to hand a long conversation over to OpenCode, or when a follow-up session genuinely needs " +
+      "the earlier turns. It reads a Codex private rollout file, so it stays behind that explicit intent.",
     inputSchema: {
       ...commonShape,
-      model: z.string().min(1).max(512).describe("Explicit authorized OpenCode model in provider/model form. Required because transfer import metadata cannot safely infer user-specific model access."),
+      model: commonShape.model,
       threadId: z.string().regex(/^[A-Za-z0-9-]{1,128}$/).optional(),
       rolloutFile: z.string().min(1).max(4_096).optional(),
       title: z.string().min(1).max(1_024).optional(),

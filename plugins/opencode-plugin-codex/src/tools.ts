@@ -5,6 +5,8 @@ import {
   classifyOpenCodeFailure,
   detectOpenCodeJsonlError,
   discoverOpenCode,
+  isRetryableOpenCodeFailure,
+  openCodeFailureMessage,
   runOpenCode,
   splitModel
 } from "./opencode-cli.js";
@@ -605,13 +607,76 @@ export async function opencodeTransfer(args: CommonArgs & {
   });
 }
 
+const TERMINAL_JOB_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
+
+/** After this long, re-polling a terminal record is pure waste and says so. */
+const STALE_TERMINAL_POLL_MS = 5 * 60_000;
+
+/**
+ * The part of a job response that describes the job's outcome rather than the
+ * query's. `ok: true` on a record whose status is "failed" was the old shape, and
+ * with no `terminal` flag the only viable strategy was to keep polling: 3,819 poll
+ * rounds across 685 jobs.
+ */
+function jobOutcomeEnvelope(job: JobRecord): {
+  ok: boolean;
+  terminal: boolean;
+  nextAction: string;
+  warnings: string[];
+  error?: { code: string; message: string; retryable: boolean };
+} {
+  const terminal = TERMINAL_JOB_STATUSES.has(job.status);
+  const warnings: string[] = [];
+  if (terminal && job.finishedAt) {
+    const finishedMsAgo = Date.now() - Date.parse(job.finishedAt);
+    if (Number.isFinite(finishedMsAgo) && finishedMsAgo >= STALE_TERMINAL_POLL_MS) {
+      warnings.push(
+        `Job ${job.id} reached ${job.status} ${Math.round(finishedMsAgo / 60_000)} minutes ago. ` +
+          "The record is final and cannot change; stop polling it."
+      );
+    }
+  }
+  const nextAction = terminal
+    ? "do not poll again; the record is final"
+    : "not terminal yet — wait before polling again, and do not call opencode_status and opencode_result at the same instant: opencode_result already contains the record";
+
+  if (job.status === "cancelled") {
+    return {
+      ok: false,
+      terminal,
+      nextAction,
+      warnings,
+      error: {
+        code: "cancelled",
+        message: job.errorMessage ?? "The job was cancelled before producing a final result.",
+        retryable: true
+      }
+    };
+  }
+  if (job.status === "failed") {
+    const code = job.errorClass ?? "unknown";
+    return {
+      ok: false,
+      terminal,
+      nextAction,
+      warnings,
+      error: {
+        code,
+        message: job.errorMessage ?? openCodeFailureMessage(code),
+        retryable: isRetryableOpenCodeFailure(code)
+      }
+    };
+  }
+  return { ok: true, terminal, nextAction, warnings };
+}
+
 export async function opencodeStatus(args: { jobId: string }) {
   const store = new JobStore();
   const job = await store.status(args.jobId);
   // The cheapest and most-called poll must carry the recovery handle; before this
   // a caller had to fetch the full result to learn a timed-out job was resumable.
   return jsonText({
-    ok: true,
+    ...jobOutcomeEnvelope(job),
     job,
     openCodeSessionId: job.opencodeSessionId,
     resumable: job.resumable === true
@@ -620,10 +685,18 @@ export async function opencodeStatus(args: { jobId: string }) {
 
 export async function opencodeResult(args: { jobId: string; maxChars?: number; view?: JobResultView }) {
   const store = new JobStore();
-  return jsonText({ ok: true, ...(await store.result(args.jobId, args.maxChars, args.view)) });
+  const result = await store.result(args.jobId, args.maxChars, args.view);
+  const envelope = jobOutcomeEnvelope(result.record);
+  return jsonText({
+    ...envelope,
+    ...result,
+    // Evidence warnings about the run itself belong next to the polling warnings.
+    warnings: [...envelope.warnings, ...result.outputSummary.warnings]
+  });
 }
 
 export async function opencodeCancel(args: { jobId: string }) {
   const store = new JobStore();
-  return jsonText({ ok: true, job: await store.cancel(args.jobId) });
+  const job = await store.cancel(args.jobId);
+  return jsonText({ ...jobOutcomeEnvelope(job), job });
 }

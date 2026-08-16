@@ -37,6 +37,12 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   of a tail. The schema now accepts up to `1000000`, the store clamps to `1..100000`, and
   the response reports the effective `maxChars` and `maxCharsClamped`.
 
+- **OX3** `opencode_status`, `opencode_result` and `opencode_cancel` no longer hardcode
+  `ok: true`. `ok` now mirrors the **job's** outcome: a `failed` or `cancelled` job
+  returns `ok: false` with `error: { code, message, retryable }` (the code is the
+  OC-3 `errorClass`, or `cancelled`). `{"ok": true, "job": {…"status":"failed"…}}` was
+  the old shape. This ships in the same version as the OC-3 vocabulary so callers adapt
+  once.
 - **OX2** Responses are no longer sent twice. Every tool result used to be serialised
   pretty-printed into `content[0].text` *and* as `structuredContent` — about 195,000,000
   characters of duplicate across the audit window, with one `opencode_result` payload at
@@ -80,6 +86,12 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 
 ### Added
 
+- **OX3** `terminal: boolean` and `nextAction: string` on `opencode_status`,
+  `opencode_result` and `opencode_cancel`. A terminal record says
+  `do not poll again; the record is final`; a live one says to wait and not to call
+  status and result at the same instant. Polling a job that has been terminal for more
+  than five minutes adds a warning naming how long ago it finished. Without these the
+  only viable strategy was busy polling: 3,819 poll rounds over 685 jobs.
 - **OX1** `maxToolCalls` on `opencode_run`, `opencode_rescue`, `opencode_review` and
   `opencode_adversarial_review`. Wall-clock used to be the only knob, and 86 timed-out
   job logs hold 1,360 tool calls (median 13, p90 37, max 81) against 202 text events —

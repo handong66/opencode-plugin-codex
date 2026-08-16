@@ -614,7 +614,8 @@ describe("opencodeResult", () => {
       )
     );
 
-    expect(result.ok).toBe(true);
+    // ok mirrors the job's outcome, not the query's: a cancelled job is not ok.
+    expect(result.ok).toBe(false);
     expect(result.outputSummary?.resultComplete).toBe(false);
     expect(result.outputSummary?.state).toBe("cancelled_partial");
     expect(result.outputSummary?.eventCounts.tool_use).toBe(2);

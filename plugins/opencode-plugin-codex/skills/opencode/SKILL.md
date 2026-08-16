@@ -39,6 +39,8 @@ Only `outputSummary.resultComplete === true` is a finished OpenCode conclusion. 
 
 `opencode_result`'s `maxChars` has an effective range of `1..100000` (default `20000`); a larger request is clamped and reported as `maxChars` plus `maxCharsClamped: true` rather than refused. Widening the window is not how to reach a conclusion — read `outputSummary`.
 
+`opencode_status`, `opencode_result`, and `opencode_cancel` return `ok` for the **job's** outcome, not the query's: a `failed` or `cancelled` job returns `ok: false` with `error: { code, message, retryable }`. `terminal: true` means the record is final — `nextAction` then reads `do not poll again; the record is final`, and polling a job that has been terminal for over five minutes adds a warning. A non-terminal job's `nextAction` says to wait, and never to call status and result at the same instant.
+
 Background state lives in a private central user-state directory and survives MCP restarts. Keep the first returned `jobId`; status/result/cancel do not take `cwd`.
 
 `errorClass` is derived only from real error channels (timeout, terminating signal, structured JSONL error, stderr), never from OpenCode's own prose. `quota_exhausted`, `auth_required`, `model_unauthorized`, and `model_not_found` are not retryable: rerunning the same call reaches the same answer, so change provider, model, or account instead. `timeout`, `terminated`, `rate_limited`, `network_error`, `opencode_failed`, and `unknown` are retryable. An unrecognised provider message is reported as `unknown` with the full text rather than filed under a guessed class.

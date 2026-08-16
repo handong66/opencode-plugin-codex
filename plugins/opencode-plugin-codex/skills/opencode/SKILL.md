@@ -7,6 +7,8 @@ description: Use when the user asks Codex to run OpenCode, continue an OpenCode 
 
 Use the bundled `opencode_*` tools. Plugin source and tests define machine behavior; this Skill only explains tool selection and boundaries.
 
+Read results from MCP `structuredContent`. The text copy is compact, and a payload above 8192 characters is not duplicated there at all: it becomes a one-line `structuredContentOnly` notice with the payload size.
+
 ## Choose a tool
 
 - Diagnose availability with `opencode_check`.

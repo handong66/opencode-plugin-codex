@@ -37,6 +37,13 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   of a tail. The schema now accepts up to `1000000`, the store clamps to `1..100000`, and
   the response reports the effective `maxChars` and `maxCharsClamped`.
 
+- **OX2** Responses are no longer sent twice. Every tool result used to be serialised
+  pretty-printed into `content[0].text` *and* as `structuredContent` — about 195,000,000
+  characters of duplicate across the audit window, with one `opencode_result` payload at
+  265,570 characters for a 100,000-character request. The text copy is now compact, and
+  above 8192 characters it is replaced by a one-line notice
+  (`{"ok":…,"structuredContentOnly":true,"payloadChars":…}`) while the full payload
+  travels once, in `structuredContent`. Callers must read `structuredContent`.
 - **OC-3** `errorClass` is no longer inferred from OpenCode's own prose. Classification
   now reads only real error channels, in order: the wall-clock timeout, a terminating
   signal, a structured JSONL `{"type":"error"}` event (branching on

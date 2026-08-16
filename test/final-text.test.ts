@@ -120,7 +120,7 @@ describe("opencode_result view", () => {
   test("keeps the raw tail by default", async () => {
     const answer = "Findings: the default view is unchanged.";
     await withStoredJob(stopStream([answer]), async ({ jobId }) => {
-      const parsed = JSON.parse((await opencodeResult({ jobId })).content[0].text) as {
+      const parsed = (await opencodeResult({ jobId })).structuredContent as {
         view?: string;
         stdout?: string;
         outputSummary?: { finalText?: string };
@@ -135,7 +135,7 @@ describe("opencode_result view", () => {
   test("drops the raw tails on request and keeps the answer", async () => {
     const answer = "Findings: the final view carries the answer.";
     await withStoredJob(stopStream([answer]), async ({ jobId }) => {
-      const parsed = JSON.parse((await opencodeResult({ jobId, view: "final" })).content[0].text) as {
+      const parsed = (await opencodeResult({ jobId, view: "final" })).structuredContent as {
         view?: string;
         stdout?: string;
         stderr?: string;

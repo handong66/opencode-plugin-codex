@@ -14,8 +14,12 @@ import {
   opencodeTransfer
 } from "../plugins/opencode-plugin-codex/src/tools.js";
 
-function parseToolResult(result: { content: Array<{ text: string }> }) {
-  return JSON.parse(result.content[0].text) as {
+/**
+ * Read the structured object, not `content[0].text`: a payload over 8KB is returned
+ * once, as structuredContent, and is deliberately not duplicated as text.
+ */
+function parseToolResult(result: { structuredContent: unknown }) {
+  return result.structuredContent as {
     ok: boolean;
     exitCode?: number | null;
     stdout?: string;

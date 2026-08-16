@@ -67,11 +67,33 @@ async function cwdOrDefault(cwd?: string, requestWorkspaceRoots: string[] = []):
   return candidate;
 }
 
+/**
+ * Above this, the payload is returned once (as structuredContent) instead of twice.
+ */
+const MAX_TEXT_PAYLOAD_CHARS = 8_192;
+
+/**
+ * Every response used to go out twice: pretty-printed as `content[0].text` and again
+ * as `structuredContent`, indentation included. Over the audit window that was about
+ * 195,000,000 characters of duplicate pushed through the caller's context, with one
+ * opencode_result payload at 265,570 characters for a 100,000-character request.
+ * Small payloads still carry both (callers read the text), large ones do not.
+ */
 function jsonText(value: unknown) {
-  return {
-    content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }],
-    structuredContent: value as Record<string, unknown>
-  };
+  const structuredContent = value as Record<string, unknown>;
+  const serialized = JSON.stringify(value);
+  const text =
+    serialized.length <= MAX_TEXT_PAYLOAD_CHARS
+      ? serialized
+      : JSON.stringify({
+          ok: structuredContent?.ok,
+          structuredContentOnly: true,
+          payloadChars: serialized.length,
+          note:
+            `Payload is ${serialized.length} characters and was returned once, as MCP structuredContent. ` +
+            "Read it there; it is deliberately not duplicated as text."
+        });
+  return { content: [{ type: "text" as const, text }], structuredContent };
 }
 
 function buildRunArgs(params: {
@@ -550,7 +572,9 @@ export async function opencodeTransfer(args: CommonArgs & {
       background: args.background ?? true,
       trustedOpenCodeBin: discovered.bin
     });
-    const continuation = JSON.parse(runResult.content[0].text) as {
+    // Read the structured object, not the text: a large continuation is no longer
+    // duplicated into content[0].text.
+    const continuation = runResult.structuredContent as {
       ok?: boolean;
       outputSummary?: { resultComplete?: boolean };
     };

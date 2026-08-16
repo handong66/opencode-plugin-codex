@@ -65,9 +65,9 @@ async function createClient(env: NodeJS.ProcessEnv): Promise<Client> {
 async function call(client: Client, name: string, args: Record<string, unknown>) {
   const result = await client.callTool({ name, arguments: args }, undefined, { timeout: 10_000 });
   if (result.isError) throw new Error(`${name} failed: ${JSON.stringify(result)}`);
-  const text = result.content?.find((item) => item.type === "text")?.text;
-  if (!text) throw new Error(`${name} returned no text.`);
-  return JSON.parse(text) as Record<string, any>;
+  // structuredContent, not the text: payloads over 8KB are no longer duplicated.
+  if (!result.structuredContent) throw new Error(`${name} returned no structured content.`);
+  return result.structuredContent as Record<string, any>;
 }
 
 afterEach(async () => {

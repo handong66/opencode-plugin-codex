@@ -129,6 +129,8 @@ async function main(): Promise<void> {
   let forceKillTimer: NodeJS.Timeout | undefined;
   let flushTimer: NodeJS.Timeout | undefined;
   let flushChain = Promise.resolve();
+  /** Serialised progress writes, awaited before the terminal record is written. */
+  let progressChain = Promise.resolve();
 
   const flushLogs = () => {
     const stdoutSnapshot = stdout;
@@ -154,18 +156,25 @@ async function main(): Promise<void> {
   /**
    * Record when output last arrived, throttled: a caller polling status can then
    * tell "still working" from "silent since", and the watchdog reads the same clock.
+   *
+   * The writes are serialised on one chain and the chain is awaited before the
+   * terminal write. Untracked, this read-modify-write could still be in flight when
+   * the job finished and would then put `running` back over the terminal record;
+   * JobStore.write now refuses that as well, so this is the near half of the same
+   * guard — it also keeps two progress writes from interleaving.
    */
   const noteEvent = () => {
     lastEventAt = Date.now();
     if (lastEventAt - lastEventPersistedAt < LAST_EVENT_PERSIST_MS) return;
     lastEventPersistedAt = lastEventAt;
     const at = new Date(lastEventAt).toISOString();
-    void (async () => {
+    progressChain = progressChain.then(async () => {
       const stored = await store.read(jobId).catch(() => undefined);
       if (!stored || ["succeeded", "failed", "cancelled"].includes(stored.status)) return;
       stored.lastEventAt = at;
       await store.write(stored).catch(() => undefined);
-    })();
+    });
+    void progressChain.catch(() => undefined);
   };
 
   const requestCancel = () => {
@@ -351,6 +360,9 @@ async function main(): Promise<void> {
 
     if (flushTimer) clearTimeout(flushTimer);
     await flushLogs();
+    // Nothing may still be in flight against the record when the terminal write
+    // reads it: a pending progress write would otherwise land afterwards.
+    await progressChain;
     const latest = finalizeJobRecord({
       record: {
         ...(await store.read(jobId)),
@@ -369,6 +381,7 @@ async function main(): Promise<void> {
     await store.write(latest);
   } catch (error) {
     if (stallTimer) clearInterval(stallTimer);
+    await progressChain.catch(() => undefined);
     await rm(store.inputPath(jobId), { force: true });
     record = await store.read(jobId).catch(() => record);
     if (record.status !== "cancelled") {

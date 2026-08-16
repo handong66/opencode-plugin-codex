@@ -27,6 +27,13 @@ export type JobKind =
 
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 
+/** A job that has ended. Nothing may put it back to work. */
+const TERMINAL_STATUSES: readonly JobStatus[] = ["succeeded", "failed", "cancelled"];
+
+export function isTerminalJobStatus(status: JobStatus): boolean {
+  return TERMINAL_STATUSES.includes(status);
+}
+
 /**
  * A small, durable copy of how the job ended.
  *
@@ -650,6 +657,15 @@ export class JobStore {
     }
   }
 
+  /** The status on disk right now, or undefined if there is no record yet. */
+  private async storedStatus(jobId: string): Promise<JobStatus | undefined> {
+    try {
+      return (await this.read(jobId)).status;
+    } catch {
+      return undefined;
+    }
+  }
+
   private async writeUnguarded(record: JobRecord): Promise<void> {
     await this.ensure();
     assertJobId(record.id);
@@ -658,6 +674,17 @@ export class JobStore {
       stdoutPath: this.stdoutPath(record.id),
       stderrPath: this.stderrPath(record.id)
     };
+    // A job that has ended stays ended. Every writer here does a read-modify-write,
+    // and the worker's throttled progress write is not awaited by anything — so a
+    // write that started before the terminal record could land after it and put
+    // `running` back on top of a `succeeded` result. The worker then exits, and the
+    // next `status()` call finds a running record with a dead workerPid and rewrites
+    // it as `worker_unavailable`: a completed result, discarded. The cancellation
+    // sentinel below is the same rule for the one status that may always win.
+    if (!isTerminalJobStatus(normalized.status)) {
+      const stored = await this.storedStatus(record.id);
+      if (stored && isTerminalJobStatus(stored)) return;
+    }
     if (normalized.status !== "cancelled") {
       const cancelRequestedAt = await this.cancellationTimestamp(record.id);
       if (cancelRequestedAt) {

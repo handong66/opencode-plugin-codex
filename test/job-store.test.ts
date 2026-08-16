@@ -91,6 +91,52 @@ describe("JobStore background lifecycle", () => {
     expect((await store.read(jobId)).status).toBe("cancelled");
   });
 
+  test("a delayed progress write cannot put a finished job back to running", async () => {
+    const root = await tempDir();
+    const store = new JobStore(root);
+    const jobId = "job_late_progress";
+    await store.write({
+      id: jobId,
+      kind: "run",
+      status: "running",
+      cwd: process.cwd(),
+      command: "opencode",
+      args: [],
+      // A worker that has since exited, which is what makes the loss permanent.
+      workerPid: 999_999,
+      createdAt: new Date().toISOString(),
+      startedAt: new Date().toISOString(),
+      timeoutMs: 600_000,
+      stdoutPath: store.stdoutPath(jobId),
+      stderrPath: store.stderrPath(jobId)
+    });
+    // The worker's noteEvent() read: taken while the job was still running.
+    const inFlight = await store.read(jobId);
+
+    const finished = await store.read(jobId);
+    finished.status = "succeeded";
+    finished.exitCode = 0;
+    finished.finishedAt = new Date().toISOString();
+    finished.opencodeSessionId = "ses_finished";
+    await store.write(finished);
+
+    // …and now it lands, after the terminal write.
+    inFlight.lastEventAt = new Date().toISOString();
+    await store.write(inFlight);
+
+    const after = await store.read(jobId);
+    expect(after.status).toBe("succeeded");
+    expect(after.exitCode).toBe(0);
+    expect(after.opencodeSessionId).toBe("ses_finished");
+
+    // The consequence this prevents: a resurrected `running` record whose worker is
+    // gone is reconciled into worker_unavailable on the next poll, and the caller is
+    // told the worker died holding a result it had already written.
+    const status = await store.status(jobId);
+    expect(status.status).toBe("succeeded");
+    expect(status.errorClass).toBeUndefined();
+  });
+
   test("reports stdin delivery failure instead of accepting a child final response", async () => {
     const root = await tempDir();
     const bin = join(root, "closed-stdin-opencode.mjs");

@@ -4,7 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { timeoutSchema } from "./timeout-budget.js";
+import { timeoutSchema, TYPICAL_WALL_TIME_NOTE } from "./timeout-budget.js";
 import {
   configureWorkspaceRootsProvider,
   opencodeAdversarialReview,
@@ -78,6 +78,21 @@ const commonShape = {
 const jobIdSchema = z.string().regex(/^job_[A-Za-z0-9_-]{1,128}$/);
 
 /**
+ * Read-only annotations for the three tools that only observe.
+ *
+ * In goal mode the client evaluates an approval for every call: one recorded
+ * 85-minute window held 18 approval requests — 7 opencode_status, 6
+ * opencode_result — all allowed, each with 5–19s of waiting, and each reasoning
+ * that the call "only retrieves the prior job result without side effects". These
+ * hints let the client know that without asking.
+ */
+const READ_ONLY_ANNOTATIONS = {
+  readOnlyHint: true,
+  idempotentHint: true,
+  openWorldHint: false
+} as const;
+
+/**
  * Server-side wait. 3,819 poll rounds over 685 jobs came from having no way to ask
  * the server to wait: each round was a full request/response, and in goal mode each
  * one also cost an approval evaluation.
@@ -146,7 +161,8 @@ server.registerTool(
           "Re-run discovery, the effective-model probe, and the provider/model listings instead of returning " +
             "the cached answer. The response reports cache.providersCachedAt and cache.providersCacheHit."
         )
-    }
+    },
+    annotations: READ_ONLY_ANNOTATIONS
   },
   (args, extra) => opencodeCheck(withCodexWorkspaceRoots(args, extra._meta))
 );
@@ -273,11 +289,12 @@ server.registerTool(
   "opencode_status",
   {
     title: "OpenCode Job Status",
-    description: "Read a background OpenCode job record.",
+    description: `Read a background OpenCode job record. ${TYPICAL_WALL_TIME_NOTE}`,
     inputSchema: {
       jobId: jobIdSchema,
       waitMs: waitMsSchema
-    }
+    },
+    annotations: READ_ONLY_ANNOTATIONS
   },
   opencodeStatus
 );
@@ -311,7 +328,8 @@ server.registerTool(
             "a larger request is clamped to 100000 and the response reports maxChars and maxCharsClamped. " +
             "Widening this window is not how to reach the final answer — read outputSummary instead."
         )
-    }
+    },
+    annotations: READ_ONLY_ANNOTATIONS
   },
   opencodeResult
 );

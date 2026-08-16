@@ -129,6 +129,40 @@ describe("published tool schemas", () => {
     expect((await toolProperties(client, "opencode_continue")).maxToolCalls).toBeUndefined();
   });
 
+  test("publishes typical wall time and when not to cancel", async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+
+    // 43 recorded cancellations came at a median of 107s elapsed - 26 under 120s -
+    // against a median successful job of 99s. Nothing said what on-schedule was.
+    const timeoutMs = (await toolProperties(client, "opencode_run")).timeoutMs;
+    expect(timeoutMs.description ?? "").toMatch(/Do not cancel before timeoutMs/);
+    expect(timeoutMs.description ?? "").toMatch(/~129s/);
+
+    const statusDescription = tools.find((tool) => tool.name === "opencode_status")?.description ?? "";
+    expect(statusDescription).toMatch(/Do not cancel before timeoutMs/);
+  });
+
+  test("annotates the observing tools as read-only", async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+
+    // 18 approval requests in one recorded 85-minute window, all allowed, 13 of them
+    // opencode_status/opencode_result, each costing 5-19s of waiting.
+    for (const toolName of ["opencode_check", "opencode_status", "opencode_result"]) {
+      const annotations = tools.find((tool) => tool.name === toolName)?.annotations;
+
+      expect(annotations, toolName).toBeDefined();
+      expect(annotations?.readOnlyHint, toolName).toBe(true);
+      expect(annotations?.idempotentHint, toolName).toBe(true);
+      expect(annotations?.openWorldHint, toolName).toBe(false);
+    }
+    // Everything that starts or ends OpenCode work stays unannotated.
+    for (const toolName of ["opencode_run", "opencode_continue", "opencode_cancel", "opencode_transfer"]) {
+      expect(tools.find((tool) => tool.name === toolName)?.annotations?.readOnlyHint, toolName).not.toBe(true);
+    }
+  });
+
   test("publishes a server-side wait on both polling tools", async () => {
     const client = await connect();
 

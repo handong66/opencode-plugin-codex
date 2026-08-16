@@ -38,6 +38,29 @@ export const KIND_P90_MS: Partial<Record<JobKind, number>> = {
   adversarial_review: 370_000
 };
 
+/**
+ * Median wall time per kind, for callers deciding whether a job is late.
+ *
+ * 43 recorded cancellations came at a median of 107s of elapsed time — 26 of them
+ * under 120s and 12 under 60s — against a median successful job of 99s and a p90 of
+ * 278s. Most of those jobs were cancelled while still on schedule, because nothing
+ * in the response said what "on schedule" looked like.
+ */
+export const KIND_MEDIAN_MS: Partial<Record<JobKind, number>> = {
+  continue: 62_000,
+  run: 129_000,
+  rescue: 145_000,
+  review: 171_000,
+  adversarial_review: 223_000
+};
+
+/** One sentence, published on every tool that starts or observes a job. */
+export const TYPICAL_WALL_TIME_NOTE =
+  "Typical wall time on this machine (median): continue ~62s, run ~129s, review ~171s, adversarial_review ~223s; " +
+  "successful jobs overall run ~99s median and ~278s p90. Do not cancel before timeoutMs unless status shows " +
+  "waitingForAuth or zero events for more than 45s — 26 of 43 recorded cancellations came before 120s, while the job " +
+  "was still on schedule.";
+
 export const KIND_P90_SAMPLE_SIZE: Partial<Record<JobKind, number>> = {
   continue: 290,
   rescue: 7,
@@ -57,7 +80,8 @@ export const timeoutSchema = z
       "at timeoutMs=600000 only 15 of 213 real jobs timed out (7%), at 900000 1 of 64, while at 120000 200 of 350 timed out (57%) " +
       "and at 180000 76 of 156 (49%). Lowering timeoutMs does not make OpenCode faster; it discards work. " +
       "Omit this field unless the user asked for a hard deadline. Foreground calls (background:false) are clamped to 240000 " +
-      "because Codex aborts a tools/call at 300s; use background:true for a real budget."
+      "because Codex aborts a tools/call at 300s; use background:true for a real budget. " +
+      TYPICAL_WALL_TIME_NOTE
   );
 
 export type TimeoutBudget = {

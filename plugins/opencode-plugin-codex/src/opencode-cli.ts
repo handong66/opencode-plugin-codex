@@ -10,6 +10,8 @@ export type DiscoverOpenCodeOptions = {
   env?: NodeJS.ProcessEnv;
   homeDir?: string;
   extraCandidates?: string[];
+  /** Skip the process-lifetime memo and re-probe. */
+  force?: boolean;
 };
 
 export type DiscoverOpenCodeResult = {
@@ -18,6 +20,12 @@ export type DiscoverOpenCodeResult = {
   version?: string;
   tried: string[];
   errors: string[];
+  /** How the binary was chosen: trusted explicitly, probed, or remembered. */
+  source?: "explicit" | "probe" | "cache";
+  /** `cli_not_found` when nothing was executable, `cli_probe_timeout` when a
+   * candidate existed but never answered `--version` inside the probe budget. */
+  errorCode?: "cli_not_found" | "cli_probe_timeout";
+  cachedAt?: string;
 };
 
 export type RunProcessOptions = {
@@ -154,40 +162,149 @@ export async function runProcess(
   });
 }
 
+/**
+ * Probe budget. The old 5s was tight enough that a cold binary answering slowly was
+ * recorded as "not found", and the caller was handed a list of 19 paths instead of
+ * the reason.
+ */
+const VERSION_PROBE_TIMEOUT_MS = 15_000;
+
+/** Best-effort version read for a bin we already decided to trust. */
+const TRUSTED_VERSION_PROBE_TIMEOUT_MS = 5_000;
+
+type DiscoveryCacheEntry = { key: string; result: DiscoverOpenCodeResult };
+
+/**
+ * Process-lifetime memo. Every call used to re-walk 19 candidates with a 5s probe
+ * each, with no cache anywhere, which is how `opencode_check` could report the CLI
+ * available at 05:05:22 and `opencode_run` report it missing 27 seconds later —
+ * with the caller's own explicit `opencodeBin` among the 19 paths it listed.
+ * Only successes are remembered, and a remembered bin is re-checked for existence.
+ */
+let discoveryCache: DiscoveryCacheEntry | null = null;
+
+function discoveryCacheKey(options: DiscoverOpenCodeOptions): string {
+  const env = options.env ?? process.env;
+  return JSON.stringify([
+    options.opencodeBin ?? "",
+    env.OPENCODE_BIN ?? "",
+    env.PATH ?? "",
+    options.homeDir ?? env.HOME ?? "",
+    options.extraCandidates ?? []
+  ]);
+}
+
+/** Exposed for tests and for a future explicit `force` refresh path. */
+export function resetOpenCodeDiscoveryCache(): void {
+  discoveryCache = null;
+}
+
+async function readVersion(
+  candidate: string,
+  options: DiscoverOpenCodeOptions,
+  timeoutMs: number
+): Promise<{ version?: string; error?: string; timedOut: boolean }> {
+  try {
+    const result = await runProcess(candidate, ["--version"], { env: options.env, timeoutMs });
+    if (result.exitCode === 0) {
+      return { version: result.stdout.trim() || result.stderr.trim(), timedOut: false };
+    }
+    return {
+      error: `${candidate}: --version exited ${result.exitCode ?? "null"}${result.timedOut ? " (probe timed out)" : ""}: ${result.stderr.trim()}`,
+      timedOut: result.timedOut === true
+    };
+  } catch (error) {
+    return { error: `${candidate}: ${error instanceof Error ? error.message : String(error)}`, timedOut: false };
+  }
+}
+
 export async function discoverOpenCode(
   options: DiscoverOpenCodeOptions = {}
 ): Promise<DiscoverOpenCodeResult> {
+  const key = discoveryCacheKey(options);
+  if (!options.force && discoveryCache?.key === key && discoveryCache.result.bin) {
+    if (await isExecutable(discoveryCache.result.bin)) {
+      return { ...discoveryCache.result, source: "cache" };
+    }
+    discoveryCache = null;
+  }
+
   const tried: string[] = [];
   const errors: string[] = [];
 
+  // An explicitly configured binary is a decision, not a suggestion: it is trusted
+  // once it is executable, and `--version` only fills in the version string.
+  const env = options.env ?? process.env;
+  const home = options.homeDir ?? env.HOME ?? homedir();
+  const explicitBin = options.opencodeBin ?? env.OPENCODE_BIN;
+  if (explicitBin) {
+    const candidate = expandHome(explicitBin, home);
+    tried.push(candidate);
+    if (await isExecutable(candidate)) {
+      const probe = await readVersion(candidate, options, TRUSTED_VERSION_PROBE_TIMEOUT_MS);
+      if (probe.error) errors.push(probe.error);
+      const result: DiscoverOpenCodeResult = {
+        ok: true,
+        bin: candidate,
+        version: probe.version,
+        tried,
+        errors,
+        source: "explicit"
+      };
+      discoveryCache = { key, result: { ...result, cachedAt: new Date().toISOString() } };
+      return result;
+    }
+    errors.push(`${candidate}: not executable or not found (explicitly configured)`);
+  }
+
+  let sawProbeTimeout = false;
   for (const candidate of getOpenCodeCandidates(options)) {
+    if (tried.includes(candidate)) continue;
     tried.push(candidate);
     if (!(await isExecutable(candidate))) {
       errors.push(`${candidate}: not executable or not found`);
       continue;
     }
 
-    try {
-      const result = await runProcess(candidate, ["--version"], {
-        env: options.env,
-        timeoutMs: 5_000
-      });
-      if (result.exitCode === 0) {
-        return {
-          ok: true,
-          bin: candidate,
-          version: result.stdout.trim() || result.stderr.trim(),
-          tried,
-          errors
-        };
-      }
-      errors.push(`${candidate}: --version exited ${result.exitCode}: ${result.stderr.trim()}`);
-    } catch (error) {
-      errors.push(`${candidate}: ${error instanceof Error ? error.message : String(error)}`);
+    const probe = await readVersion(candidate, options, VERSION_PROBE_TIMEOUT_MS);
+    if (probe.version !== undefined) {
+      const result: DiscoverOpenCodeResult = {
+        ok: true,
+        bin: candidate,
+        version: probe.version,
+        tried,
+        errors,
+        source: "probe"
+      };
+      discoveryCache = { key, result: { ...result, cachedAt: new Date().toISOString() } };
+      return result;
     }
+    sawProbeTimeout ||= probe.timedOut;
+    if (probe.error) errors.push(probe.error);
   }
 
-  return { ok: false, tried, errors };
+  // A failure is never cached: the next call must be free to find a CLI that just
+  // finished installing.
+  return {
+    ok: false,
+    tried,
+    errors,
+    errorCode: sawProbeTimeout ? "cli_probe_timeout" : "cli_not_found"
+  };
+}
+
+/** The message a caller sees when discovery fails: paths *and* reasons. */
+export function describeDiscoveryFailure(discovered: DiscoverOpenCodeResult): string {
+  const reasons = discovered.errors.slice(-5);
+  const code = discovered.errorCode ?? "cli_not_found";
+  const headline =
+    code === "cli_probe_timeout"
+      ? `OpenCode CLI did not answer --version within ${VERSION_PROBE_TIMEOUT_MS}ms (cli_probe_timeout).`
+      : "OpenCode CLI not found (cli_not_found).";
+  return (
+    `${headline} Tried: ${discovered.tried.join(", ")}` +
+    (reasons.length ? `. Reasons: ${reasons.join(" | ")}` : "")
+  );
 }
 
 export async function runOpenCode(
@@ -196,7 +313,7 @@ export async function runOpenCode(
 ): Promise<ProcessResult & { bin: string }> {
   const discovered = await discoverOpenCode(options);
   if (!discovered.ok || !discovered.bin) {
-    throw new Error(`OpenCode CLI not found. Tried: ${discovered.tried.join(", ")}`);
+    throw new Error(describeDiscoveryFailure(discovered));
   }
 
   const result = await runProcess(discovered.bin, args, options);

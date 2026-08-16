@@ -37,6 +37,17 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   of a tail. The schema now accepts up to `1000000`, the store clamps to `1..100000`, and
   the response reports the effective `maxChars` and `maxCharsClamped`.
 
+- **OX4** OpenCode discovery is memoised for the life of the MCP server process, an
+  explicitly configured binary (`opencodeBin`, `OPENCODE_BIN`) is trusted once it is
+  executable instead of being gated on `--version`, and the probe budget rose from 5s to
+  15s. Previously every call re-walked up to 19 candidates with a 5s probe each and no
+  cache anywhere, which is how `opencode_check` could report the CLI available and
+  `opencode_run` report it missing 27 seconds later — while listing the caller's own
+  explicit path among the 19 it tried. A remembered binary is re-checked for existence,
+  and failures are never remembered. `discoverOpenCode` reports `source`
+  (`explicit` | `probe` | `cache`).
+- **OX4** Discovery failures now separate `cli_not_found` from `cli_probe_timeout`, and
+  the thrown message carries the reasons (`errors[]`), not just the list of paths.
 - **OX3** `opencode_status`, `opencode_result` and `opencode_cancel` no longer hardcode
   `ok: true`. `ok` now mirrors the **job's** outcome: a `failed` or `cancelled` job
   returns `ok: false` with `error: { code, message, retryable }` (the code is the

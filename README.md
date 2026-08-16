@@ -26,7 +26,7 @@ Important parameters and boundaries:
 - `prompt` is sent through stdin. It is never persisted in job records or placed in CLI argv.
 - `cwd` must resolve inside a filesystem root supplied by the MCP client through standard roots or current Codex per-call workspace metadata. `files` accepts at most 32 existing regular files whose real paths stay inside `cwd`; outside paths and escaping symlinks are rejected.
 - Configure a nonstandard OpenCode executable in the trusted MCP environment with `OPENCODE_BIN`. Tools do not expose a caller-controlled binary path.
-- `opencode_run` defaults to background mode. `timeoutMs` applies to foreground and background work.
+- `opencode_run` defaults to background mode. `timeoutMs` applies to foreground and background work, accepts `10000..86400000`, and defaults to `600000`. Foreground calls are clamped to `240000` because Codex aborts a `tools/call` at 300s; longer budgets require background mode. A clamp, or a budget below the recorded p90 for that job kind, is reported in `warnings[]` and never refuses the call.
 - `autoApprovePermissions` maps to current OpenCode `--auto`, which auto-approves permission prompts not explicitly denied. It does not allow Codex private paths. `allowCodexPrivatePaths` is a separate explicit boundary. `dangerouslySkipPermissions` remains a deprecated alias for `autoApprovePermissions` only.
 - Background state is stored in the user's private state area (normally `~/.local/state/opencode-plugin-codex`). Directories use mode `0700`; job, input, and log files use `0600`.
 - Status/result/cancel use only the returned `jobId`. An independent worker owns the OpenCode process, timeout, bounded logs, cancellation, and terminal state so MCP restarts do not lose control.

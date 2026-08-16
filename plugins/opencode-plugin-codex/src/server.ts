@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { timeoutSchema } from "./timeout-budget.js";
 import {
   configureWorkspaceRootsProvider,
   opencodeAdversarialReview,
@@ -62,7 +63,6 @@ const commonShape = {
   model: z.string().min(1).max(512).optional().describe("OpenCode model in provider/model form. Pass an actually authorized model from the user's OpenCode provider config.")
 };
 
-const timeoutSchema = z.number().int().positive().max(86_400_000).optional();
 const jobIdSchema = z.string().regex(/^job_[A-Za-z0-9_-]{1,128}$/);
 
 server.registerTool(

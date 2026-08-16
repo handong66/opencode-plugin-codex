@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { detectOpenCodeJsonlError, discoverOpenCode, sanitizeOpenCodeEnv } from "./opencode-cli.js";
+import { DEFAULT_TIMEOUT_MS } from "./timeout-budget.js";
 
 export type JobKind =
   | "run"
@@ -67,7 +68,6 @@ export type JobStoreOptions = {
   env?: NodeJS.ProcessEnv;
 };
 
-const DEFAULT_TIMEOUT_MS = 600_000;
 const WORKER_STARTUP_GRACE_MS = 2_000;
 const MAX_RESULT_CHARS = 100_000;
 const SUMMARY_READ_CHARS = 1_000_000;

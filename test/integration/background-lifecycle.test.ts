@@ -79,7 +79,7 @@ describe("background lifecycle across MCP restarts", () => {
       cwd: process.cwd(),
       prompt: "cross-process cancellation probe",
       background: true,
-      timeoutMs: 5_000
+      timeoutMs: 10_000
     });
     const jobId = started.job.id as string;
     await first.close();

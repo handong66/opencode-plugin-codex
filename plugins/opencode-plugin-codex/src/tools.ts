@@ -11,6 +11,7 @@ import {
 import { findCodexRolloutFile, readCodexTranscriptFromRollout } from "./codex-rollout.js";
 import { toOpenCodeSession } from "./opencode-session.js";
 import { JobStore, summarizeOpenCodeOutput, type JobRecord } from "./job-store.js";
+import { resolveTimeoutBudget } from "./timeout-budget.js";
 
 export type CommonArgs = {
   cwd?: string;
@@ -179,24 +180,30 @@ async function runOrStartJob(params: {
   validatePromptBoundary(params.prompt, params.allowCodexPrivatePaths);
   await validateFileAttachments(params.files, cwd);
   const args = buildRunArgs({ ...params, cwd });
-  if (params.background ?? true) {
+  const background = params.background ?? true;
+  const budget = resolveTimeoutBudget({
+    kind: params.kind,
+    background,
+    requestedTimeoutMs: params.timeoutMs
+  });
+  if (background) {
     const store = new JobStore();
     const job = await store.startOpenCodeJob({
       kind: params.kind,
       cwd,
       args,
       prompt: params.prompt,
-      timeoutMs: params.timeoutMs,
+      timeoutMs: budget.timeoutMs,
       opencodeBin: params.trustedOpenCodeBin,
       opencodeSessionId: params.sessionId
     });
-    return jsonText({ ok: true, background: true, job });
+    return jsonText({ ok: true, background: true, job, warnings: budget.warnings });
   }
 
   const result = await runOpenCode(args, {
     cwd,
     opencodeBin: params.trustedOpenCodeBin,
-    timeoutMs: params.timeoutMs ?? 600_000,
+    timeoutMs: budget.timeoutMs,
     input: params.prompt
   });
   const structuredError = detectOpenCodeJsonlError(result.stdout, result.stderr);
@@ -212,7 +219,7 @@ async function runOrStartJob(params: {
     createdAt: completedAt,
     startedAt: completedAt,
     finishedAt: completedAt,
-    timeoutMs: params.timeoutMs ?? 600_000,
+    timeoutMs: budget.timeoutMs,
     exitCode: result.exitCode,
     signal: result.signal,
     errorClass: structuredError?.errorClass ?? (processSucceeded ? undefined : classifyOpenCodeFailure(result)),
@@ -228,7 +235,8 @@ async function runOrStartJob(params: {
     stdoutTruncated: result.stdoutTruncated,
     stderrTruncated: result.stderrTruncated,
     errorClass: summaryRecord.errorClass,
-    outputSummary: summarizeOpenCodeOutput(summaryRecord, result.stdout, result.stderr)
+    outputSummary: summarizeOpenCodeOutput(summaryRecord, result.stdout, result.stderr),
+    warnings: budget.warnings
   });
 }
 

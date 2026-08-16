@@ -5,6 +5,7 @@ import { describe, expect, test } from "vitest";
 import { JobStore } from "../plugins/opencode-plugin-codex/src/job-store.js";
 import {
   opencodeAdversarialReview,
+  opencodeContinue,
   opencodeResult,
   opencodeRun,
   opencodeTransfer
@@ -15,6 +16,12 @@ function parseToolResult(result: { content: Array<{ text: string }> }) {
     ok: boolean;
     exitCode?: number | null;
     stdout?: string;
+    warnings?: string[];
+    maxChars?: number;
+    maxCharsClamped?: boolean;
+    openCodeSessionId?: string;
+    resumable?: boolean;
+    record?: { timeoutMs?: number; opencodeSessionId?: string; resumable?: boolean };
     outputSummary?: {
       resultComplete: boolean;
       state: string;
@@ -300,6 +307,58 @@ describe("opencodeRun", () => {
 
       expect(invocation.args).toContain("--auto");
       expect(invocation.args).not.toContain("--dangerously-skip-permissions");
+    });
+  });
+});
+
+describe("timeout budget warnings", () => {
+  test("clamps a foreground call to the Codex tools/call ceiling and warns instead of refusing", async () => {
+    await withFakeOpenCode(async () => {
+      const result = parseToolResult(
+        await opencodeRun({
+          cwd: process.cwd(),
+          background: false,
+          timeoutMs: 900_000,
+          prompt: "foreground clamp probe"
+        })
+      );
+
+      expect(result.ok).toBe(true);
+      expect(result.warnings?.some((warning) => warning.includes("240000"))).toBe(true);
+      expect(result.warnings?.some((warning) => /background:true/.test(warning))).toBe(true);
+    });
+  });
+
+  test("warns that a low foreground review budget is under the kind p90 but still runs", async () => {
+    await withFakeOpenCode(async () => {
+      const result = parseToolResult(
+        await opencodeAdversarialReview({
+          cwd: process.cwd(),
+          background: false,
+          timeoutMs: 60_000,
+          target: "one file"
+        })
+      );
+
+      expect(result.ok).toBe(true);
+      expect(result.warnings?.some((warning) => /p90 wall time for kind=adversarial_review/.test(warning))).toBe(true);
+    });
+  });
+
+  test("stays silent on a foreground budget that is already within both bounds", async () => {
+    await withFakeOpenCode(async () => {
+      const result = parseToolResult(
+        await opencodeContinue({
+          cwd: process.cwd(),
+          background: false,
+          timeoutMs: 180_000,
+          sessionId: "ses_budget_probe",
+          prompt: "no warning probe"
+        })
+      );
+
+      expect(result.ok).toBe(true);
+      expect(result.warnings).toEqual([]);
     });
   });
 });

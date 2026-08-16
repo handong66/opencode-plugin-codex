@@ -1,0 +1,88 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { afterEach, describe, expect, test } from "vitest";
+
+const tempDirs: string[] = [];
+const clients: Client[] = [];
+
+type JsonSchemaProperty = {
+  type?: string;
+  minimum?: number;
+  maximum?: number;
+  description?: string;
+};
+
+async function connect(): Promise<Client> {
+  const workspace = process.cwd();
+  const scratch = await mkdtemp(join(tmpdir(), "opencode-plugin-contract-"));
+  tempDirs.push(scratch);
+  const client = new Client(
+    { name: "tool-contract-test", version: "0.1.0" },
+    { capabilities: { roots: {} } }
+  );
+  client.setRequestHandler(ListRootsRequestSchema, async () => ({
+    roots: [{ uri: pathToFileURL(workspace).href, name: "contract-test-workspace" }]
+  }));
+  await client.connect(
+    new StdioClientTransport({
+      command: process.execPath,
+      args: [join(workspace, "plugins/opencode-plugin-codex/dist/server.js")],
+      cwd: scratch,
+      env: { ...process.env },
+      stderr: "pipe"
+    })
+  );
+  clients.push(client);
+  return client;
+}
+
+async function toolProperties(client: Client, toolName: string): Promise<Record<string, JsonSchemaProperty>> {
+  const { tools } = await client.listTools();
+  const tool = tools.find((candidate) => candidate.name === toolName);
+  if (!tool) throw new Error(`${toolName} is not registered.`);
+  return (tool.inputSchema.properties ?? {}) as Record<string, JsonSchemaProperty>;
+}
+
+afterEach(async () => {
+  await Promise.all(clients.splice(0).map((client) => client.close().catch(() => undefined)));
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+describe("published tool schemas", () => {
+  test("every execution tool publishes the same timeout floor, ceiling, and budget guidance", async () => {
+    const client = await connect();
+
+    for (const toolName of [
+      "opencode_run",
+      "opencode_continue",
+      "opencode_rescue",
+      "opencode_review",
+      "opencode_adversarial_review"
+    ]) {
+      const timeoutMs = (await toolProperties(client, toolName)).timeoutMs;
+
+      expect(timeoutMs, toolName).toBeDefined();
+      expect(timeoutMs.minimum, toolName).toBe(10_000);
+      expect(timeoutMs.maximum, toolName).toBe(86_400_000);
+      expect(timeoutMs.description ?? "", toolName).toContain("600000");
+      expect(timeoutMs.description ?? "", toolName).toMatch(/does not make OpenCode faster/i);
+    }
+  });
+
+  test("rejects a timeoutMs that cannot finish an OpenCode job", async () => {
+    const client = await connect();
+
+    const response = await client.callTool({
+      name: "opencode_run",
+      arguments: { cwd: process.cwd(), background: false, timeoutMs: 1_000, prompt: "floor probe" }
+    });
+
+    expect(response.isError).toBe(true);
+    expect(JSON.stringify(response.content)).toMatch(/10000/);
+  });
+});

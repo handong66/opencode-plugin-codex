@@ -15,7 +15,11 @@ Use the bundled `opencode_*` tools. Plugin source and tests define machine behav
 - Use `opencode_transfer` only when visible Codex conversation context is worth importing into OpenCode's local session database.
 - Manage background work with `opencode_status`, `opencode_result`, and `opencode_cancel` using only the returned `jobId`.
 
-`opencode_run` defaults to background execution. `timeoutMs` applies in both foreground and background modes. Put task text in `prompt`; it is sent through stdin. `files` accepts at most 32 existing regular files whose real paths remain inside `cwd`. `cwd` must remain inside a root supplied by standard MCP roots or current Codex per-call workspace metadata. Configure a nonstandard CLI through the trusted MCP environment variable `OPENCODE_BIN`; tools do not accept a caller-controlled executable path.
+`opencode_run` defaults to background execution. Put task text in `prompt`; it is sent through stdin. `files` accepts at most 32 existing regular files whose real paths remain inside `cwd`. `cwd` must remain inside a root supplied by standard MCP roots or current Codex per-call workspace metadata. Configure a nonstandard CLI through the trusted MCP environment variable `OPENCODE_BIN`; tools do not accept a caller-controlled executable path.
+
+## Budget contract
+
+`timeoutMs` applies in both foreground and background modes and accepts `10000..86400000`; omitting it means 600000. Foreground calls (`background:false`) are clamped to 240000 because Codex aborts a `tools/call` at 300s, so a budget larger than that only exists in background mode. A clamp or a budget below the kind's recorded p90 is reported in `warnings[]` and never refuses the call. Budget and polling workflow belong to the Codex `codex-opencode-collaboration` Skill, not here.
 
 Use `autoApprovePermissions` to request current OpenCode `--auto` behavior. It auto-approves prompts not explicitly denied. It does not permit Codex private paths. Set `allowCodexPrivatePaths` separately only after explicit user authorization. `dangerouslySkipPermissions` is a deprecated compatibility alias for `autoApprovePermissions` and does not widen path access.
 

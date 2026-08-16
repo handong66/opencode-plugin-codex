@@ -113,6 +113,31 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 
 ### Added
 
+- **OC-8** Boundary refusals are typed. `workspace_unavailable`,
+  `workspace_out_of_bounds`, `file_attachment_invalid`, `private_path_blocked`,
+  `rollout_invalid` and `state_write_failed` replace bare `Error` throws, each with a
+  stable code, `retryable: false`, and details. 9,892 recorded events carried exactly
+  one error code between them. The guards themselves are unchanged and still
+  fail-closed — including the deliberate `Promise.all` over workspace roots, which is
+  not relaxed to `allSettled`: no recorded event ever hit a root resolution failure.
+- **OC-8** `workspace_out_of_bounds` now lists the roots that *are* available and says
+  that they are Codex's per-call workspace roots, so a newly created worktree is
+  rejected until it is added to the Codex workspace. That sentence covers three of the
+  four recorded refusals.
+- **OC-8** The attachment refusal says what a legal value is —
+  `Attachments must resolve inside cwd (<cwd>). Copy the file into the workspace, or
+  inline its contents in prompt.` The old message repeated verbatim six times in one
+  month while never saying that.
+- **OC-8** `opencode_check` degrades instead of failing whole: with no usable workspace
+  root it returns `workspace: { ok: false, error: { code, message, retryable } }` and
+  still reports CLI discovery and the effective model (probed from a neutral
+  directory), while provider and model listings are skipped. Every execution tool
+  remains fail-closed, and the response says so rather than inviting a raw CLI call.
+- **OC-8** A failed job-record write is `state_write_failed` and names the state
+  directory, the errno, and `OPENCODE_PLUGIN_STATE_DIR`. The one recorded ENOSPC
+  surfaced as a raw errno from a temp file with no mention of which directory filled.
+  Not implemented (rejected in the spec): default retention cleanup of the state
+  directory — the surviving job logs are the only forensic surface there is.
 - **OC-7** `modelSelection` on every execution result and job record: `source` is
   `opencode_config` when the caller omitted `model` (943 of 1,051 recorded jobs) and
   `explicit` when it did not, plus `requested`, the `configured` default, and the

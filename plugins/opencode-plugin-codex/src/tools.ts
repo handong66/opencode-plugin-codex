@@ -20,6 +20,12 @@ import {
 } from "./job-store.js";
 import { resolveTimeoutBudget } from "./timeout-budget.js";
 import {
+  BoundaryError,
+  isBoundaryError,
+  workspaceOutOfBounds,
+  workspaceUnavailable
+} from "./boundary.js";
+import {
   describeModelSelection,
   probeEffectiveModel,
   type ModelSelection
@@ -47,29 +53,48 @@ function isWithin(root: string, candidate: string): boolean {
 
 async function cwdOrDefault(cwd?: string, requestWorkspaceRoots: string[] = []): Promise<string> {
   const providedRoots = [...new Set([...(await workspaceRootsProvider()), ...requestWorkspaceRoots])];
+  // Deliberately still Promise.all and still fail-closed: no recorded event ever hit
+  // a root realpath failure, and loosening a boundary for a hypothetical is a bad
+  // trade. What changes is that the refusal now has a code and names the roots.
   const workspaceRoots = await Promise.all(
     providedRoots.map(async (root) => {
-      const resolvedRoot = await realpath(root);
+      const resolvedRoot = await realpath(root).catch(() => {
+        throw workspaceUnavailable(`MCP workspace root could not be resolved: ${root}.`, { root });
+      });
       if (!(await stat(resolvedRoot)).isDirectory()) {
-        throw new Error(`MCP workspace root is not a directory: ${resolvedRoot}.`);
+        throw workspaceUnavailable(`MCP workspace root is not a directory: ${resolvedRoot}.`, {
+          root: resolvedRoot
+        });
       }
       return resolvedRoot;
     })
   );
   if (!workspaceRoots.length) {
-    throw new Error("The MCP client did not provide a filesystem workspace root.");
+    throw workspaceUnavailable(
+      "The MCP client did not provide a filesystem workspace root. " +
+        "Codex sends its workspace roots with each call, so a call made before a workspace is attached has none. " +
+        "opencode_check still returns CLI and effective-model diagnostics in this state; execution tools do not run."
+    );
   }
   let candidate: string;
   try {
     candidate = await realpath(resolve(cwd ?? workspaceRoots[0]));
   } catch {
-    throw new Error(`Working directory does not exist: ${cwd ?? workspaceRoots[0]}.`);
+    throw new BoundaryError(
+      "workspace_out_of_bounds",
+      `Working directory does not exist: ${cwd ?? workspaceRoots[0]}. Available roots: ${workspaceRoots.join(", ")}.`,
+      { candidate: cwd ?? workspaceRoots[0], roots: workspaceRoots }
+    );
   }
   if (!workspaceRoots.some((root) => isWithin(root, candidate))) {
-    throw new Error(`Working directory is outside the MCP workspace roots: ${candidate}.`);
+    throw workspaceOutOfBounds(candidate, workspaceRoots);
   }
   if (!(await stat(candidate)).isDirectory()) {
-    throw new Error(`Working directory is not a directory: ${candidate}.`);
+    throw new BoundaryError(
+      "workspace_out_of_bounds",
+      `Working directory is not a directory: ${candidate}. Available roots: ${workspaceRoots.join(", ")}.`,
+      { candidate, roots: workspaceRoots }
+    );
   }
   return candidate;
 }
@@ -125,6 +150,16 @@ function buildRunArgs(params: {
   return args;
 }
 
+/**
+ * What a legal attachment looks like.
+ *
+ * The old rejection repeated verbatim six times in a month because it only ever
+ * said what was wrong; a caller could not tell whether to move the file, inline it,
+ * or pick a different cwd.
+ */
+const ATTACHMENT_REMEDY = (cwd: string): string =>
+  `Attachments must resolve inside cwd (${cwd}). Copy the file into the workspace, or inline its contents in prompt.`;
+
 function describeFileValue(file: string): string {
   const singleLine = file.replace(/\s+/g, " ").trim();
   return JSON.stringify(singleLine.length > 80 ? `${singleLine.slice(0, 77)}...` : singleLine);
@@ -134,11 +169,18 @@ async function validateFileAttachments(files: string[] | undefined, cwd: string)
   const workspaceRoot = await realpath(cwd);
   for (const file of files ?? []) {
     if (!file.trim()) {
-      throw new Error("files only accepts filesystem paths. Put task text in prompt.");
+      throw new BoundaryError(
+        "file_attachment_invalid",
+        `files only accepts filesystem paths. Put task text in prompt. ${ATTACHMENT_REMEDY(cwd)}`,
+        { cwd }
+      );
     }
     if (file !== file.trim() || /[\r\n]/.test(file) || file.length > 1_024) {
-      throw new Error(
-        `files only accepts filesystem paths. Put long task text in prompt instead of files: ${describeFileValue(file)}`
+      throw new BoundaryError(
+        "file_attachment_invalid",
+        `files only accepts filesystem paths. Put long task text in prompt instead of files: ${describeFileValue(file)}. ` +
+          ATTACHMENT_REMEDY(cwd),
+        { cwd, file: describeFileValue(file) }
       );
     }
 
@@ -147,23 +189,35 @@ async function validateFileAttachments(files: string[] | undefined, cwd: string)
     try {
       resolvedFile = await realpath(filePath);
     } catch {
-      throw new Error(
-        `File attachment not found: ${describeFileValue(file)}. files only accepts existing filesystem paths; put task text in prompt.`
+      throw new BoundaryError(
+        "file_attachment_invalid",
+        `File attachment not found: ${describeFileValue(file)}. ${ATTACHMENT_REMEDY(cwd)}`,
+        { cwd, file: describeFileValue(file) }
       );
     }
     const relativePath = relative(workspaceRoot, resolvedFile);
     if (relativePath.startsWith(`..${sep}`) || relativePath === ".." || isAbsolute(relativePath)) {
-      throw new Error(`File attachment is outside the active workspace: ${describeFileValue(file)}.`);
+      throw new BoundaryError(
+        "file_attachment_invalid",
+        `File attachment is outside the active workspace: ${describeFileValue(file)}. ${ATTACHMENT_REMEDY(cwd)}`,
+        { cwd, file: describeFileValue(file) }
+      );
     }
     if (!(await stat(resolvedFile)).isFile()) {
-      throw new Error(`File attachment must be a regular file: ${describeFileValue(file)}.`);
+      throw new BoundaryError(
+        "file_attachment_invalid",
+        `File attachment must be a regular file: ${describeFileValue(file)}. ${ATTACHMENT_REMEDY(cwd)}`,
+        { cwd, file: describeFileValue(file) }
+      );
     }
   }
 }
 
 async function validateRolloutFile(rolloutFile: string, cwd: string): Promise<string> {
   const resolvedFile = await realpath(rolloutFile).catch(() => {
-    throw new Error(`Rollout file does not exist: ${rolloutFile}.`);
+    throw new BoundaryError("rollout_invalid", `Rollout file does not exist: ${rolloutFile}.`, {
+      rolloutFile
+    });
   });
   const roots = [await realpath(cwd)];
   const codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex");
@@ -171,10 +225,17 @@ async function validateRolloutFile(rolloutFile: string, cwd: string): Promise<st
   if (sessionsRoot) roots.push(sessionsRoot);
 
   if (!roots.some((root) => isWithin(root, resolvedFile))) {
-    throw new Error(`Rollout file is outside the workspace and Codex sessions directory: ${rolloutFile}.`);
+    throw new BoundaryError(
+      "rollout_invalid",
+      `Rollout file is outside the workspace and Codex sessions directory: ${rolloutFile}. ` +
+        `Allowed roots: ${roots.join(", ")}.`,
+      { rolloutFile, roots }
+    );
   }
   if (!(await stat(resolvedFile)).isFile() || !resolvedFile.endsWith(".jsonl")) {
-    throw new Error(`Rollout file must be a JSONL file: ${rolloutFile}.`);
+    throw new BoundaryError("rollout_invalid", `Rollout file must be a JSONL file: ${rolloutFile}.`, {
+      rolloutFile
+    });
   }
   return resolvedFile;
 }
@@ -184,7 +245,8 @@ function validatePromptBoundary(prompt: string, allowCodexPrivatePaths?: boolean
 
   const codexPrivatePathPattern = /(?:^|[\s"'`(])(?:~|\$HOME|\/[^\s"'`)]+)\/\.codex(?:\/|\b)/;
   if (codexPrivatePathPattern.test(prompt)) {
-    throw new Error(
+    throw new BoundaryError(
+      "private_path_blocked",
       "Prompt asks OpenCode to read Codex private runtime paths such as ~/.codex. " +
         "Inline the collaboration instructions in prompt, or use OpenCode-native skill paths under ~/.config/opencode/skills. " +
         "Set allowCodexPrivatePaths only when the user explicitly authorizes that private path access."
@@ -371,13 +433,46 @@ export async function opencodeCheck(
 
   if (!discovered.ok) return jsonText({ ...data, warnings });
 
-  const cwd = await cwdOrDefault(args.cwd, args._workspaceRoots);
+  // A missing workspace root used to make the whole diagnostic fail with a bare
+  // exception, hiding CLI and model information that has nothing to do with the
+  // workspace — and four recorded missing-root refusals are exactly when a caller
+  // most needs that information. Diagnostics degrade; execution tools stay
+  // fail-closed and still refuse.
+  let cwd: string | undefined;
+  try {
+    cwd = await cwdOrDefault(args.cwd, args._workspaceRoots);
+    data.workspace = { ok: true, cwd };
+  } catch (error) {
+    const boundary = isBoundaryError(error) ? error : undefined;
+    data.workspace = {
+      ok: false,
+      error: {
+        code: boundary?.code ?? "workspace_unavailable",
+        message: (error instanceof Error ? error.message : String(error)).slice(0, 2_000),
+        retryable: boundary?.retryable ?? false
+      }
+    };
+    warnings.push(
+      "Workspace validation failed, so provider and model listings were skipped. These diagnostics are global " +
+        "only; every execution tool still refuses until a workspace root is available. Do not fall back to a raw " +
+        "OpenCode CLI call — that bypasses the model, permission, path, and job-record contracts."
+    );
+  }
+
   // What OpenCode itself would use when the caller omits `model` — the case in 943
   // of 1,051 recorded jobs. Only four allowlisted scalars are read; the raw config
-  // (credentials included) is never parsed further or returned.
-  const effective = await probeEffectiveModel({ opencodeBin: discovered.bin!, cwd, force: args.force });
+  // (credentials included) is never parsed further or returned. Without a workspace
+  // this runs from a neutral directory and reports the global configuration.
+  const effective = await probeEffectiveModel({
+    opencodeBin: discovered.bin!,
+    cwd: cwd ?? tmpdir(),
+    force: args.force
+  });
   if (effective.config) data.effectiveModel = effective.config;
   warnings.push(...effective.warnings);
+
+  if (!cwd) return jsonText({ ...data, warnings });
+
   const providers = await runOpenCode(["providers", "list"], {
     cwd,
     opencodeBin: discovered.bin,

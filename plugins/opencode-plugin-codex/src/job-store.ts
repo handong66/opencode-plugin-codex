@@ -15,6 +15,7 @@ import {
 } from "./opencode-cli.js";
 import { DEFAULT_TIMEOUT_MS } from "./timeout-budget.js";
 import type { ModelSelection } from "./model-guard.js";
+import { isBoundaryError, stateWriteFailed } from "./boundary.js";
 
 export type JobKind =
   | "run"
@@ -494,6 +495,17 @@ export class JobStore {
   }
 
   async write(record: JobRecord): Promise<void> {
+    try {
+      await this.writeUnguarded(record);
+    } catch (error) {
+      if (isBoundaryError(error)) throw error;
+      // One recorded ENOSPC surfaced from this method's temp file as a raw errno
+      // with no mention of which directory had filled up.
+      throw stateWriteFailed(error, this.stateDir);
+    }
+  }
+
+  private async writeUnguarded(record: JobRecord): Promise<void> {
     await this.ensure();
     assertJobId(record.id);
     let normalized: JobRecord = {

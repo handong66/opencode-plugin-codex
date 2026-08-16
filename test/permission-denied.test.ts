@@ -104,13 +104,14 @@ describe("permission auto-rejection", () => {
   });
 
   test("keeps the denial visible on a job that did produce final text", () => {
+    // kind `run`: a review with zero tool calls is separately not a complete result.
     const stdout = [
       JSON.stringify({ type: "step_start", sessionID: "ses_text" }),
       JSON.stringify({ type: "text", sessionID: "ses_text", part: { type: "text", text: "No issues found." } }),
       JSON.stringify({ type: "step_finish", sessionID: "ses_text", part: { type: "step-finish", reason: "stop" } })
     ].join("\n");
 
-    const summary = summarizeOpenCodeOutput(succeededRecord(), stdout, AUTO_REJECT_STDERR);
+    const summary = summarizeOpenCodeOutput(succeededRecord({ kind: "run" }), stdout, AUTO_REJECT_STDERR);
 
     expect(summary.resultComplete).toBe(true);
     expect(summary.permissionDenied).toBe(true);

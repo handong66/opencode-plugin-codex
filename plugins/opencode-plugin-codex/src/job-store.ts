@@ -77,6 +77,21 @@ export type JobOutputSummary = {
   finalTextTruncated: boolean;
   sawToolUse: boolean;
   sawSubagentTask: boolean;
+  /** How many tool calls the run made. A verdict with zero is an opinion. */
+  toolCallCount: number;
+  /** Distinct file paths OpenCode actually opened or searched. */
+  filesInspected: number;
+  /** OpenCode steps, i.e. model turns. */
+  turnsUsed: number;
+  /**
+   * Interactive skills a headless delegation loaded anyway (repository bootstrap
+   * files tell every agent to load a persona first). Deduped and capped.
+   */
+  skillsLoaded: string[];
+  /** Derived from toolCallCount and filesInspected; `none` means nothing was read. */
+  evidenceLevel: "none" | "thin" | "substantive";
+  /** Advisory notes about the run itself, never a reason to hide the output. */
+  warnings: string[];
   /**
    * True when OpenCode asked for a permission it did not get. A job can exit 0 and
    * still have inspected nothing, so this must be read before believing an empty
@@ -110,6 +125,14 @@ const MAX_DENIED_PATHS = 5;
 
 /** Budget for the returned final answer. Recorded answers: median 4,226, max 24,811. */
 const MAX_FINAL_TEXT_CHARS = 32_000;
+
+const MAX_SKILLS_LOADED = 10;
+
+/** Successful jobs made a median of 5 tool calls; below that is a glance. */
+const SUBSTANTIVE_TOOL_CALLS = 5;
+
+/** Kinds whose whole value is having looked at something. */
+const REVIEW_KINDS = new Set<JobKind>(["review", "adversarial_review"]);
 
 /** The literal line OpenCode writes to stderr when it auto-rejects a permission. */
 const AUTO_REJECT_PATTERN = /permission requested: (\w+) \(([^)]*)\); auto-rejecting/g;
@@ -197,6 +220,10 @@ export function summarizeOpenCodeOutput(record: JobRecord, stdout: string, stder
   let sawTerminalStop = false;
   let sawToolUse = false;
   let sawSubagentTask = false;
+  let toolCallCount = 0;
+  let turnsUsed = 0;
+  const inspectedPaths = new Set<string>();
+  const skillsLoaded = new Set<string>();
   const structuredError = detectOpenCodeJsonlError(stdout, stderr);
   const deniedPaths = collectDeniedPaths(stderr);
 
@@ -228,6 +255,7 @@ export function summarizeOpenCodeOutput(record: JobRecord, stdout: string, stder
     lastEventType = eventType;
 
     if (eventType === "step_start") {
+      turnsUsed += 1;
       currentStepChunks = [];
       finalText = "";
       sawTerminalStop = false;
@@ -235,14 +263,26 @@ export function summarizeOpenCodeOutput(record: JobRecord, stdout: string, stder
 
     if (eventType === "tool_use" || typedEvent.part?.type === "tool") {
       sawToolUse = true;
-      if (typedEvent.part?.tool === "task") sawSubagentTask = true;
+      toolCallCount += 1;
+      const tool = typedEvent.part?.tool;
+      if (tool === "task") sawSubagentTask = true;
       const state = typedEvent.part?.state;
-      if (typeof state?.error === "string" && REJECTED_TOOL_STATE_PATTERN.test(state.error)) {
-        const input = state.input ?? {};
-        const path = [input.path, input.filePath, input.command].find(
+      const input = state?.input ?? {};
+      const inspected = [input.filePath, input.path, input.pattern].find(
+        (value): value is string => typeof value === "string" && value.trim().length > 0
+      );
+      if (inspected && tool !== "skill") inspectedPaths.add(inspected);
+      if (tool === "skill") {
+        const name = [input.name, input.skill].find(
           (value): value is string => typeof value === "string" && value.trim().length > 0
         );
-        deniedPaths.push(path ?? typedEvent.part?.tool ?? "unknown target");
+        skillsLoaded.add(name ?? "unnamed skill");
+      }
+      if (typeof state?.error === "string" && REJECTED_TOOL_STATE_PATTERN.test(state.error)) {
+        const deniedTarget = [input.path, input.filePath, input.command].find(
+          (value): value is string => typeof value === "string" && value.trim().length > 0
+        );
+        deniedPaths.push(deniedTarget ?? tool ?? "unknown target");
       }
     }
     if (eventType === "text" && typeof typedEvent.part?.text === "string" && typedEvent.part.text.trim()) {
@@ -271,11 +311,40 @@ export function summarizeOpenCodeOutput(record: JobRecord, stdout: string, stder
   else if (record.status === "queued") state = "queued_partial";
   else state = "running_partial";
 
-  const resultComplete = state === "succeeded_with_text";
+  const filesInspected = inspectedPaths.size;
+  const evidenceLevel: JobOutputSummary["evidenceLevel"] =
+    toolCallCount === 0
+      ? "none"
+      : toolCallCount >= SUBSTANTIVE_TOOL_CALLS && filesInspected > 0
+        ? "substantive"
+        : "thin";
+  const warnings: string[] = [];
+
+  // A review that opened nothing is an opinion. In the sibling plugin 30 of 64
+  // "succeeded" review jobs made zero tool calls and each one was counted as a vote.
+  const zeroEvidenceVerdict =
+    REVIEW_KINDS.has(record.kind) && state === "succeeded_with_text" && toolCallCount === 0;
+  if (zeroEvidenceVerdict) {
+    warnings.push("verdict produced with 0 tool calls — treat as opinion, not review");
+  }
+  if (skillsLoaded.size) {
+    warnings.push(
+      `OpenCode loaded ${skillsLoaded.size} skill(s) before doing the requested work: ${[...skillsLoaded].join(", ")}. ` +
+        "A headless delegation should not be loading interactive personas; that budget is spent before the task starts."
+    );
+  }
+
+  const resultComplete = state === "succeeded_with_text" && !zeroEvidenceVerdict;
   const boundedDeniedPaths = deniedPaths.slice(0, MAX_DENIED_PATHS);
+  const hasFinalText = state === "succeeded_with_text";
   let guidance: string;
   if (resultComplete) {
     guidance = "OpenCode produced final text. Codex must still verify findings against the workspace before acting on them.";
+  } else if (zeroEvidenceVerdict) {
+    guidance =
+      `OpenCode returned a ${record.kind} verdict without making a single tool call, so nothing in the workspace was ` +
+      "read. Treat this as an opinion, not a review: do not count it as a passing vote. Rerun with a target it can " +
+      "open, and require every finding to cite file:line.";
   } else if (record.status === "running" || record.status === "queued") {
     guidance = "OpenCode is still running. Poll status/result later or cancel and rerun with a narrower target; do not treat current stdout as a final review.";
   } else if (record.status === "cancelled") {
@@ -324,15 +393,22 @@ export function summarizeOpenCodeOutput(record: JobRecord, stdout: string, stder
     eventCounts,
     openCodeSessionId,
     lastEventType,
-    lastTextPreview: (resultComplete ? finalText : lastObservedText)
-      ? previewText(resultComplete ? finalText : lastObservedText)
+    lastTextPreview: (hasFinalText ? finalText : lastObservedText)
+      ? previewText(hasFinalText ? finalText : lastObservedText)
       : undefined,
     // The answer itself, not a preview of it. Before this the only structured way to
     // read a 4,000-character review was to re-implement this parser on the caller side.
-    finalText: resultComplete ? finalText.slice(0, MAX_FINAL_TEXT_CHARS) : undefined,
-    finalTextTruncated: resultComplete && finalText.length > MAX_FINAL_TEXT_CHARS,
+    // Present even for a zero-evidence verdict: the caller has to read what was claimed.
+    finalText: hasFinalText ? finalText.slice(0, MAX_FINAL_TEXT_CHARS) : undefined,
+    finalTextTruncated: hasFinalText && finalText.length > MAX_FINAL_TEXT_CHARS,
     sawToolUse,
     sawSubagentTask,
+    toolCallCount,
+    filesInspected,
+    turnsUsed,
+    skillsLoaded: [...skillsLoaded].slice(0, MAX_SKILLS_LOADED),
+    evidenceLevel,
+    warnings,
     permissionDenied: deniedPaths.length > 0,
     deniedPaths: boundedDeniedPaths,
     errorClass: structuredError?.errorClass ?? record.errorClass,

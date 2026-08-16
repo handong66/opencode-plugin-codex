@@ -7,7 +7,10 @@ import { opencodeResult } from "../plugins/opencode-plugin-codex/src/tools.js";
 function record(overrides: Partial<JobRecord> = {}): JobRecord {
   return {
     id: "job_final_text",
-    kind: "review",
+    // `run`, not `review`: a review with zero tool calls is deliberately not a
+    // complete result (see test/evidence-counters.test.ts), and these cases are
+    // about the answer field, not about evidence.
+    kind: "run",
     status: "succeeded",
     cwd: "/tmp/workspace",
     command: "opencode",

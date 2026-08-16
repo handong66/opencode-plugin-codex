@@ -30,6 +30,9 @@ function parseToolResult(result: { content: Array<{ text: string }> }) {
       state: string;
       eventCounts: Record<string, number>;
       sawSubagentTask: boolean;
+      toolCallCount?: number;
+      evidenceLevel?: string;
+      warnings?: string[];
       errorClass?: string;
       guidance: string;
     };
@@ -619,8 +622,10 @@ describe("opencodeResult", () => {
     const jobId = "job_succeeded_text";
     const stdout = await readFile("test/fixtures/opencode-run-events-current.jsonl", "utf8");
 
+    // kind `run`: the same stream under `review` is a zero-tool-call verdict, which is
+    // deliberately not a complete result (see test/evidence-counters.test.ts).
     const result = parseToolResult(
-      await withTempJob({ id: jobId, status: "succeeded" }, stdout, "", () =>
+      await withTempJob({ id: jobId, kind: "run", status: "succeeded" }, stdout, "", () =>
         opencodeResult({ jobId })
       )
     );
@@ -629,6 +634,22 @@ describe("opencodeResult", () => {
     expect(result.outputSummary?.resultComplete).toBe(true);
     expect(result.outputSummary?.state).toBe("succeeded_with_text");
     expect(result.outputSummary?.guidance).toMatch(/Codex must still verify/i);
+  });
+
+  test("refuses to call a zero-tool-call review verdict a finished result", async () => {
+    const jobId = "job_zero_evidence_review";
+    const stdout = await readFile("test/fixtures/opencode-run-events-current.jsonl", "utf8");
+
+    const result = parseToolResult(
+      await withTempJob({ id: jobId, kind: "review", status: "succeeded" }, stdout, "", () =>
+        opencodeResult({ jobId })
+      )
+    );
+
+    expect(result.outputSummary?.resultComplete).toBe(false);
+    expect(result.outputSummary?.toolCallCount).toBe(0);
+    expect(result.outputSummary?.evidenceLevel).toBe("none");
+    expect((result.outputSummary?.warnings ?? []).join(" ")).toMatch(/opinion, not review/);
   });
 
   test("does not treat text from an earlier tool-call step as the final result", async () => {
@@ -829,7 +850,14 @@ describe("headless delegation preamble", () => {
         expect(invocation.input.startsWith("This is a headless, single-purpose delegation.")).toBe(true);
         expect(invocation.input).toContain("load pua first");
         expect(invocation.input).toContain("Do not narrate steps.");
+        // X2: a verdict has to say what it read, and every finding has to point at code.
+        expect(invocation.input).toContain("file:line");
+        expect(invocation.input).toMatch(/Inspected list/);
       }
+      const adversarialPrompt = (JSON.parse((adversarial.stdout ?? "").trim()) as { input: string }).input;
+      // The old cap silently truncated adversarial coverage at five findings.
+      expect(adversarialPrompt).not.toMatch(/at most 5 findings/);
+      expect(adversarialPrompt).toMatch(/sorted by severity/);
     });
   });
 });

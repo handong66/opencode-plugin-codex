@@ -355,7 +355,8 @@ export async function opencodeReview(args: CommonArgs & {
     "Do not spawn subagents for this bounded review. If parallel or full security-audit work is truly required, stop and say that a separate explicitly scoped OpenCode task is needed.",
     "Inspect only the named target and directly relevant files; if the scope is too broad, ask for a narrower target instead of expanding.",
     "Prioritize correctness bugs, regressions, risk-sensitive failure modes, and missing tests.",
-    "Return Findings first, then Open questions, then Test gaps. Keep it concise. Stay read-only."
+    "Every finding must cite file:line. A verdict of no findings must be followed by an Inspected list naming the files you actually opened; do not report a conclusion you did not read the code for.",
+    "Return Findings first, then Open questions, then Test gaps, then Inspected. Keep it concise. Stay read-only."
   ].join("\n");
   return runOrStartJob({ ...args, kind: "review", prompt });
 }
@@ -375,7 +376,9 @@ export async function opencodeAdversarialReview(args: CommonArgs & {
     "Do not perform repo-wide discovery unless the target is explicitly repo-wide.",
     "Inspect only the named target and directly relevant files; if more scope is needed, say what is missing instead of expanding.",
     "Find hidden breakage paths, bad assumptions, permission/path/platform issues, and failure modes.",
-    "Return at most 5 findings, then Highest-risk assumption, Recommended verification, and Scope not inspected. Stay read-only."
+    "Report every finding you have, sorted by severity, and mark the five most severe as primary — do not silently drop the rest.",
+    "Every finding must cite file:line. A verdict of no findings must be followed by an Inspected list naming the files you actually opened.",
+    "Return Findings (primary first), then Highest-risk assumption, Recommended verification, Inspected, and Scope not inspected. Stay read-only."
   ].join("\n");
   return runOrStartJob({ ...args, kind: "adversarial_review", prompt });
 }

@@ -27,6 +27,8 @@ A job with `outputSummary.permissionDenied === true` inspected less than it was 
 
 ## Result and safety gates
 
+`outputSummary` reports what the run actually did: `toolCallCount`, `filesInspected`, `turnsUsed`, `skillsLoaded[]`, and the derived `evidenceLevel` (`none` | `thin` | `substantive`). A `review` or `adversarial_review` that made zero tool calls is reported as `resultComplete: false` with the warning `verdict produced with 0 tool calls — treat as opinion, not review`; never count it as a passing vote. `outputSummary.warnings[]` also names any interactive skill a headless delegation loaded.
+
 `outputSummary.finalText` is OpenCode's answer; the stdout tail is evidence, not the answer. It is present only when `resultComplete === true`, is bounded at 32000 characters, and reports `finalTextTruncated` when that bound was hit. `opencode_result` accepts `view: "raw" | "final"`; `raw` remains the default and `final` drops the stdout/stderr tails (`rawOmitted: true`) for callers that only need the answer.
 
 Only `outputSummary.resultComplete === true` is a finished OpenCode conclusion. Running, queued, cancelled, failed, JSONL-error, truncated, or succeeded-without-final-text output is partial evidence. Codex must verify every finding against real files and commands.

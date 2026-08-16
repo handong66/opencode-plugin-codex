@@ -61,6 +61,11 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   `auth_required`, `model_unauthorized`, `model_not_found`) says what to do instead of
   retrying, rather than "rerun with a narrower prompt".
 
+- **X2** The review prompts now require every finding to cite `file:line` and require a
+  no-findings verdict to list the files actually opened. `opencode_adversarial_review`'s
+  `Return at most 5 findings` became "report every finding, sorted by severity, and mark
+  the five most severe as primary" — the old cap silently truncated adversarial coverage.
+
 - **X1** `opencode_review` and `opencode_adversarial_review` prompts now open with a
   headless-delegation preamble telling OpenCode to ignore repository bootstrap
   instructions that load interactive skills or personas, and not to narrate. 89 of 231
@@ -68,6 +73,17 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 
 ### Added
 
+- **X2/X1** `outputSummary` now reports what the run actually did: `toolCallCount`,
+  `filesInspected` (distinct paths), `turnsUsed`, `skillsLoaded[]`, the derived
+  `evidenceLevel` (`none` | `thin` | `substantive`), and `warnings[]`.
+- **X2** A `review` or `adversarial_review` that made **zero tool calls** is no longer
+  `resultComplete: true`. It reports `resultComplete: false` plus the warning
+  `verdict produced with 0 tool calls — treat as opinion, not review`, and its guidance
+  says not to count it as a passing vote. In the sibling plugin 30 of 64 "succeeded"
+  review jobs had opened no file at all. `finalText` is still returned — the caller has
+  to be able to read what was claimed.
+- **X1** `outputSummary.warnings[]` names interactive skills a headless delegation loaded
+  (89 of 231 recorded logs loaded one before starting the requested work).
 - **OC-5** `outputSummary.finalText` and `outputSummary.finalTextTruncated`. The final
   answer was already parsed out of the stream and thrown away after producing a 500-char
   preview; recorded answers are median 4,226 / p90 8,784 / max 24,811 characters, so the

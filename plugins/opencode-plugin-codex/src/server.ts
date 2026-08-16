@@ -172,7 +172,9 @@ server.registerTool(
   "opencode_run",
   {
     title: "Run OpenCode",
-    description: "Start an OpenCode task from Codex.",
+    description:
+      "Start a bounded OpenCode task. Background by default; keep the returned jobId. " +
+      "Done means data.outputSummary.resultComplete === true and finalText present — nothing else counts.",
     inputSchema: {
       ...commonShape,
       prompt: z
@@ -202,7 +204,9 @@ server.registerTool(
   "opencode_continue",
   {
     title: "Continue OpenCode Session",
-    description: "Continue an existing OpenCode session.",
+    description:
+      "Continue an existing OpenCode session, which is also how a timed-out job is resumed: a timeout keeps the " +
+      "session, so continue it rather than rerunning the work. Done means outputSummary.resultComplete === true.",
     inputSchema: {
       ...commonShape,
       sessionId: z.string().min(1).max(256),
@@ -220,7 +224,9 @@ server.registerTool(
   "opencode_rescue",
   {
     title: "OpenCode Rescue",
-    description: "Ask OpenCode for an independent rescue diagnosis.",
+    description:
+      "Ask OpenCode for an independent read-only diagnosis of a stuck task. Use it when you want a second opinion " +
+      "on why something fails, not to make changes. Done means outputSummary.resultComplete === true.",
     inputSchema: {
       ...commonShape,
       problem: z.string().min(1).max(250_000),
@@ -237,7 +243,9 @@ server.registerTool(
   "opencode_review",
   {
     title: "OpenCode Review",
-    description: "Ask OpenCode to review a target such as the current diff.",
+    description:
+      "Ask OpenCode to review a named target such as the current diff. Read-only and bounded to about 20 files. " +
+      "A verdict with outputSummary.toolCallCount === 0 is an opinion, not a review, and is never resultComplete.",
     inputSchema: {
       ...commonShape,
       target: z.string().min(1).max(16_384).optional(),
@@ -253,7 +261,10 @@ server.registerTool(
   "opencode_adversarial_review",
   {
     title: "OpenCode Adversarial Review",
-    description: "Ask OpenCode to find hidden breakage paths and risky assumptions.",
+    description:
+      "Ask OpenCode to find hidden breakage paths and unsafe assumptions in a named target. Read-only, bounded to " +
+      "about 20 files, and every finding cites file:line. Pass threatModel when the user has stated one; " +
+      "out-of-model findings are advisory and never blockers.",
     inputSchema: {
       ...commonShape,
       target: z.string().min(1).max(16_384).optional(),
@@ -384,7 +395,9 @@ server.registerTool(
   "opencode_cancel",
   {
     title: "Cancel OpenCode Job",
-    description: "Cancel a running OpenCode job.",
+    description:
+      "Cancel a running OpenCode job. Cancelling discards work that a timeout would have kept resumable, so prefer " +
+      "waiting: most recorded cancellations happened while the job was still on schedule.",
     inputSchema: {
       jobId: jobIdSchema
     }

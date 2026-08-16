@@ -155,6 +155,13 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 
 ### Added
 
+- **X9** The rules a caller needs every round now live where the model already sees
+  them: each execution tool's description says when to choose it and what counts as
+  done, and `opencode_check`'s says its result is stable for the session. The bundled
+  Skill kept only the contract facts and points at the vendored failure-routing
+  reference for the rest. Codex read the bundled `SKILL.md` 175 times across 58
+  sessions at 1.7–2.3K tokens each, mostly to re-learn tool selection and completion
+  rules. The plugin directory name is unchanged, and stays that way between versions.
 - **OC supplementary 2** The contract-bearing half of the collaboration Skill is now
   vendored into the plugin as
   `skills/opencode/references/failure-routing.md`, so it ships and versions with the

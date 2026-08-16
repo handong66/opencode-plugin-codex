@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -20,6 +20,9 @@ afterEach(() => {
 type CheckResult = {
   ok: boolean;
   version?: string;
+  agents?: string[];
+  proxy?: Record<string, string>;
+  legacyStateDirs?: string[];
   providers?: string[];
   providerIds?: string[];
   providersRaw?: string;
@@ -42,6 +45,7 @@ async function withCountingCli<T>(run: (context: { counts: string }) => Promise<
         "appendFileSync(process.env.FAKE_CHECK_COUNTS, process.argv.slice(2).join(' ') + '\\n');",
         "if (process.argv[2] === '--version') { console.log('1.18.16'); process.exit(0); }",
         "if (process.argv[2] === 'debug') { console.log(JSON.stringify({ model: 'aihubmix/x' })); process.exit(0); }",
+        "if (process.argv[2] === 'agent') { console.log('build'); console.log('plan'); process.exit(0); }",
         "if (process.argv[2] === 'providers') {",
         "  const esc = String.fromCharCode(27);",
         "  console.log(esc + '[1mProviders' + esc + '[0m');",
@@ -111,6 +115,45 @@ describe("opencode_check caching", () => {
       const invocations = (await readFile(counts, "utf8")).split("\n").filter(Boolean);
       expect(invocations.filter((line) => line.startsWith("providers"))).toHaveLength(2);
     });
+  });
+
+  test("reports the agent list and any proxy the CLI will inherit", async () => {
+    const previousProxy = process.env.HTTPS_PROXY;
+    process.env.HTTPS_PROXY = "http://127.0.0.1:7897";
+    try {
+      await withCountingCli(async () => {
+        const result = readEnvelope<CheckResult>(await opencodeCheck({ cwd: process.cwd() }));
+
+        // The user's own first question after a failed run was whether their global
+        // proxy was the cause; nothing in this diagnostic used to mention it.
+        expect(result.proxy?.HTTPS_PROXY).toBe("http://127.0.0.1:7897");
+        expect(result.warnings.join(" ")).toContain("A proxy is configured");
+        expect(result.agents).toContain("build");
+      });
+    } finally {
+      if (previousProxy === undefined) delete process.env.HTTPS_PROXY;
+      else process.env.HTTPS_PROXY = previousProxy;
+    }
+  });
+
+  test("reports a leftover 0.1-era workspace state directory without deleting it", async () => {
+    const workspace = await realpath(await mkdtemp(join(tmpdir(), "opencode-plugin-codex-legacy-")));
+    const legacy = join(workspace, ".opencode-plugin-codex");
+    await mkdir(legacy, { recursive: true });
+    try {
+      await withCountingCli(async () => {
+        const result = readEnvelope<CheckResult>(
+          await opencodeCheck({ cwd: workspace, _workspaceRoots: [workspace] })
+        );
+
+        expect(result.legacyStateDirs).toEqual([legacy]);
+        expect(result.warnings.join(" ")).toContain("safe to delete");
+        // Reported, never removed: it is a directory inside the user's own project.
+        expect(await readFile(join(legacy, ".keep"), "utf8").catch(() => "missing")).toBe("missing");
+      });
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
   });
 
   test("returns parsed provider ids with no escape sequences left in the payload", async () => {

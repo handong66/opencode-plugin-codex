@@ -155,6 +155,18 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 
 ### Added
 
+- **OX10(c)** `opencode_check` reports the proxy variables the OpenCode CLI will
+  inherit (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`) and warns when one
+  is set, and it now runs `opencode agent list` and returns the agents. A global
+  proxy was a day-0 failure surface — the user's own question after a failed run was
+  whether their global proxy was the cause — and nothing in this diagnostic mentioned
+  either fact.
+- **X10** `opencode_check` reports a leftover 0.1-era `\.opencode-plugin-codex` or
+  `\.grok-plugin-codex` directory inside the workspace, with a note that it is safe
+  to delete and safe to gitignore. One of these is still sitting in a user
+  repository from 2026-07-01, and a similar directory once broke a project's own
+  lint run. It is reported, never removed: deleting a directory in the user's
+  project is not this plugin's call.
 - **OC supplementary 4** `private_path_blocked` now says where it matched: the
   character offset plus a ~40-character window either side, with the running user's
   home directory masked to `~`, and up to three hits in `error.details`. The guard is

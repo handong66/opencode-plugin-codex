@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdtemp, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -28,7 +29,8 @@ import {
   workspaceOutOfBounds,
   workspaceUnavailable
 } from "./boundary.js";
-import { knownProviderIds, listModels, listProviders } from "./check-cache.js";
+import { knownProviderIds, listModels, listProviders, parseListOutput } from "./check-cache.js";
+import { stripAnsi } from "./ansi.js";
 import {
   describeModelSelection,
   probeEffectiveModel,
@@ -653,7 +655,40 @@ async function opencodeCheckImpl(
   if (effective.config) data.effectiveModel = effective.config;
   warnings.push(...effective.warnings);
 
+  // Environment facts the CLI itself will obey. A global proxy is a day-0 failure
+  // surface here: the user's own question after a failed run was "is it my global
+  // clash?", and nothing in this diagnostic mentioned the proxy at all.
+  const proxy = Object.fromEntries(
+    ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"].flatMap((name) => {
+      const value = process.env[name] ?? process.env[name.toLowerCase()];
+      return value ? [[name, value]] : [];
+    })
+  );
+  data.proxy = proxy;
+  if (Object.keys(proxy).length) {
+    warnings.push(
+      `A proxy is configured for this MCP server process (${Object.keys(proxy).join(", ")}). ` +
+        "OpenCode inherits it; if provider calls fail or hang, test the provider with the proxy disabled before " +
+        "blaming the model."
+    );
+  }
+
   if (!cwd) return envelope({ ok: true, data, warnings });
+
+  // A 0.1-era workspace-local job directory left inside the user's repository. It
+  // is only reported: deleting a directory in the user's project is not this
+  // plugin's call, and one of these once broke a repository's own lint run.
+  const legacyStateDirs = [".opencode-plugin-codex", ".grok-plugin-codex"].filter((name) =>
+    existsSync(join(cwd!, name))
+  );
+  if (legacyStateDirs.length) {
+    data.legacyStateDirs = legacyStateDirs.map((name) => join(cwd!, name));
+    warnings.push(
+      `Found leftover 0.1-era plugin state in this workspace: ${legacyStateDirs.join(", ")}. ` +
+        "Current job state lives in the central user state directory, so these are safe to delete " +
+        "(and safe to add to .gitignore); nothing here writes to them. They are reported, never removed."
+    );
+  }
 
   // Cached for the life of this MCP server process: 456 of 471 recorded check calls
   // returned the same listing, and each one re-ran the CLI. `force` re-reads.
@@ -678,6 +713,17 @@ async function opencodeCheckImpl(
         data,
         warnings
       });
+    }
+  }
+
+  const agents = await runOpenCode(["agent", "list"], { cwd, timeoutMs: 30_000 }).catch((error) => {
+    warnings.push(`agent list failed: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  });
+  if (agents) {
+    data.agents = parseListOutput(agents.stdout || agents.stderr).lines;
+    if (agents.exitCode !== 0) {
+      warnings.push(`agent list exited ${agents.exitCode}: ${stripAnsi(agents.stderr || agents.stdout).trim()}`);
     }
   }
 

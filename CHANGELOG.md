@@ -392,8 +392,14 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   one job made 53 tool calls and produced no text at all. Reaching the ceiling does not
   SIGTERM the job: the worker ends that pass and asks the same OpenCode session to
   produce its final answer from what it already gathered, then reports
-  `toolBudgetReached: true` on the record. Enforced by the background worker only; a
-  `background:false` call reports the ignored ceiling in `warnings[]`.
+  `toolBudgetReached: true` on the record. That answer pass is capped at 120000ms and
+  never given less than 30000ms, so this is the one case where a job can finish after
+  `timeoutMs` — by at most 30s, plus the 2s SIGKILL grace. The parameter description
+  says so: handing the answer pass whatever budget happened to be left would discard
+  exactly the work the interrupt exists to save, and an unannounced overrun is
+  indistinguishable from a budget the worker does not honour. Enforced by the
+  background worker only; a `background:false` call reports the ignored ceiling in
+  `warnings[]`.
 - **OX1** Both review prompts now carry a hard file budget ("do not open more than 20
   files; say which subset you reviewed and which you skipped").
 - **X2/X1** `outputSummary` now reports what the run actually did: `toolCallCount`,

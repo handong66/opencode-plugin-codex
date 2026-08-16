@@ -144,6 +144,11 @@ describe("published tool schemas", () => {
       expect(property.maximum, toolName).toBe(500);
       expect(property.description ?? "", toolName).toMatch(/does not kill the job/i);
       expect(property.description ?? "", toolName).toMatch(/background is true/i);
+      // The final-answer pass has a 30000ms floor, so this ceiling is the one way a
+      // job can finish after timeoutMs. An undocumented overrun is indistinguishable
+      // from a budget the worker does not honour.
+      expect(property.description ?? "", toolName).toMatch(/after timeoutMs/i);
+      expect(property.description ?? "", toolName).toMatch(/30000ms|30s/);
     }
     expect((await toolProperties(client, "opencode_continue")).maxToolCalls).toBeUndefined();
   });

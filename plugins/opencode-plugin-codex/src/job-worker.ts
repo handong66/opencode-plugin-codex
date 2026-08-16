@@ -4,6 +4,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { sanitizeOpenCodeEnv } from "./opencode-cli.js";
 import {
   buildFinalAnswerArgs,
+  finalAnswerBudgetMs,
   finalizeJobRecord,
   isProviderStall,
   readStreamProgress,
@@ -22,10 +23,6 @@ const STALL_CHECK_INTERVAL_MS = 5_000;
 
 /** How often the record's lastEventAt is persisted while a job runs. */
 const LAST_EVENT_PERSIST_MS = 10_000;
-
-/** Ceiling on the extra pass that asks for the final answer. */
-const FINAL_ANSWER_MAX_MS = 120_000;
-const FINAL_ANSWER_MIN_MS = 30_000;
 
 function appendTail(current: string, chunk: string): { value: string; truncated: boolean } {
   const combined = current + chunk;
@@ -315,7 +312,7 @@ async function main(): Promise<void> {
       const finalAnswer = await runFinalAnswerPass({
         record,
         sessionId: streamSessionId,
-        timeoutMs: Math.max(Math.min(remainingMs, FINAL_ANSWER_MAX_MS), FINAL_ANSWER_MIN_MS),
+        timeoutMs: finalAnswerBudgetMs(remainingMs),
         onStdout: (chunk) => {
           const appended = appendTail(stdout, chunk);
           stdout = appended.value;

@@ -124,8 +124,10 @@ const maxToolCallsSchema = z
   .optional()
   .describe(
     "Optional ceiling on OpenCode tool calls (1..500). On reaching it the background worker does not kill the job: " +
-      "it asks the same OpenCode session to produce its final answer from what it already gathered. " +
-      "Successful jobs make a median of 5 tool calls; timed-out jobs a median of 13. Enforced only when background is true."
+      "it asks the same OpenCode session to produce its final answer from what it already gathered. That answer pass " +
+      "is capped at 120000ms and never given less than 30000ms, so a job that reaches the ceiling near the end of its " +
+      "budget can finish up to 30s after timeoutMs — the alternative is discarding the work the interrupt exists to " +
+      "save. Successful jobs make a median of 5 tool calls; timed-out jobs a median of 13. Enforced only when background is true."
   );
 
 /**

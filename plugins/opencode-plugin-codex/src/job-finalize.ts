@@ -17,6 +17,29 @@ export const FINAL_ANSWER_PROMPT =
   "You have reached the tool-call budget for this delegation. Stop investigating and produce your final answer now " +
   "from what you have already gathered. Do not make any further tool calls. State explicitly what you did not get to inspect.";
 
+/** Ceiling on the extra pass that asks for the final answer. */
+export const FINAL_ANSWER_MAX_MS = 120_000;
+
+/**
+ * Floor on that pass, and the one way a job can finish after `timeoutMs`.
+ *
+ * Interrupting a run at its tool-call ceiling and then giving the answer pass
+ * whatever scraps of budget are left would throw away the work the interrupt exists
+ * to save, so the pass is never given less than this. A job that reaches
+ * `maxToolCalls` late can therefore run up to 30s past `timeoutMs` (plus the 2s
+ * SIGKILL grace); it is published on the parameter and stated in the changelog,
+ * because an undocumented overrun is indistinguishable from a broken budget.
+ */
+export const FINAL_ANSWER_MIN_MS = 30_000;
+
+/**
+ * Budget for the final-answer pass, given the wall-clock budget still unspent when
+ * the first pass was interrupted. `remainingMs` may be zero or negative.
+ */
+export function finalAnswerBudgetMs(remainingMs: number): number {
+  return Math.max(Math.min(remainingMs, FINAL_ANSWER_MAX_MS), FINAL_ANSWER_MIN_MS);
+}
+
 /**
  * Turn the original argv into a continuation of the same OpenCode session.
  * `--fork` is dropped: the point is to finish this session, not to branch it.

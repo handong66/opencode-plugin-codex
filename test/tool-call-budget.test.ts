@@ -1,7 +1,10 @@
 import { describe, expect, test } from "vitest";
 import {
   buildFinalAnswerArgs,
+  finalAnswerBudgetMs,
   readStreamProgress,
+  FINAL_ANSWER_MAX_MS,
+  FINAL_ANSWER_MIN_MS,
   FINAL_ANSWER_PROMPT
 } from "../plugins/opencode-plugin-codex/src/job-finalize.js";
 
@@ -60,5 +63,31 @@ describe("final answer prompt", () => {
     expect(FINAL_ANSWER_PROMPT).toMatch(/final answer now/i);
     expect(FINAL_ANSWER_PROMPT).toMatch(/no further tool calls|not make any further tool calls/i);
     expect(FINAL_ANSWER_PROMPT).toMatch(/did not get to inspect/i);
+  });
+});
+
+describe("final-answer budget", () => {
+  test("never gives the answer pass less than 30s, and caps it at 120s", () => {
+    // The interrupt exists to save what the run already gathered; handing the answer
+    // pass the 3s of budget that happened to be left would discard exactly that.
+    expect(finalAnswerBudgetMs(600_000)).toBe(FINAL_ANSWER_MAX_MS);
+    expect(finalAnswerBudgetMs(60_000)).toBe(60_000);
+    expect(finalAnswerBudgetMs(3_000)).toBe(FINAL_ANSWER_MIN_MS);
+    expect(finalAnswerBudgetMs(0)).toBe(FINAL_ANSWER_MIN_MS);
+    expect(finalAnswerBudgetMs(-5_000)).toBe(FINAL_ANSWER_MIN_MS);
+  });
+
+  test("bounds the overrun a caller has to expect at the 30s floor", () => {
+    // The published maxToolCalls text promises "up to 30s after timeoutMs". The
+    // worst case is a ceiling reached with no budget left: the pass still gets the
+    // floor, and nothing longer, because remainingMs caps every other case.
+    const timeoutMs = 600_000;
+    const worstFinish = Math.max(
+      ...[0, 1, 1_000, 29_999, 30_000, 120_000, 599_999, 600_000].map(
+        (elapsedMs) => elapsedMs + finalAnswerBudgetMs(timeoutMs - elapsedMs)
+      )
+    );
+
+    expect(worstFinish - timeoutMs).toBe(FINAL_ANSWER_MIN_MS);
   });
 });

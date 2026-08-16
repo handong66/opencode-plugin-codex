@@ -5,6 +5,7 @@ import { sanitizeOpenCodeEnv } from "./opencode-cli.js";
 import {
   buildFinalAnswerArgs,
   finalizeJobRecord,
+  isProviderStall,
   readStreamProgress,
   FINAL_ANSWER_PROMPT
 } from "./job-finalize.js";
@@ -13,17 +14,10 @@ import { JobStore, type JobRecord } from "./job-store.js";
 const MAX_CAPTURE_CHARS = 1_000_000;
 
 /**
- * No-progress watchdog.
- *
- * A model-level hang and a tool loop looked identical to the caller: both burned
- * the whole budget. The recorded hangs produced a 304-byte stdout — a single
- * `step_start` — while the same task on an explicit lighter model finished in about
- * 15 seconds. The watchdog only fires while the run has produced almost nothing:
- * once real output is flowing, silence is a long tool call, not a hang, and killing
- * that would throw away work the timeout branch can still resume.
+ * How often the no-progress watchdog re-reads its clock. The rule it applies is
+ * `isProviderStall` in job-finalize.ts, where it can be tested without a real
+ * 45-second job.
  */
-const STALL_TIMEOUT_MS = 45_000;
-const STALL_MAX_STDOUT_CHARS = 4_000;
 const STALL_CHECK_INTERVAL_MS = 5_000;
 
 /** How often the record's lastEventAt is persisted while a job runs. */
@@ -239,9 +233,15 @@ async function main(): Promise<void> {
       forceKillTimer ??= setTimeout(() => signalTree(child, "SIGKILL"), 2_000);
       forceKillTimer.unref();
     };
-    /** Count tool calls on complete lines only; a half-written line cannot be parsed. */
+    /**
+     * Count tool calls on complete lines only; a half-written line cannot be parsed.
+     *
+     * This runs for every job, not only the ones carrying a `maxToolCalls` ceiling:
+     * the watchdog needs to know whether the run has done anything at all, and with
+     * the counter maintained only under a ceiling it could not tell "hung before
+     * doing anything" from "first tool call is a slow build".
+     */
     const trackProgress = (chunk: string) => {
-      if (!record.maxToolCalls) return;
       pendingLine += chunk;
       const lines = pendingLine.split(/\r?\n/);
       pendingLine = lines.pop() ?? "";
@@ -250,7 +250,9 @@ async function main(): Promise<void> {
         toolCallCount += progress.toolCalls;
         streamSessionId ??= progress.sessionId;
       }
-      if (toolCallCount >= record.maxToolCalls && streamSessionId) requestFinalAnswer();
+      if (record.maxToolCalls && toolCallCount >= record.maxToolCalls && streamSessionId) {
+        requestFinalAnswer();
+      }
     };
     child.stdout?.on("data", (chunk: string) => {
       const appended = appendTail(stdout, chunk);
@@ -274,7 +276,7 @@ async function main(): Promise<void> {
     stallTimer = setInterval(() => {
       if (stalled || timedOut || cancelRequested || toolBudgetReached) return;
       const silentMs = Date.now() - lastEventAt;
-      if (silentMs < STALL_TIMEOUT_MS || stdout.length >= STALL_MAX_STDOUT_CHARS) return;
+      if (!isProviderStall({ silentMs, stdoutChars: stdout.length, toolCalls: toolCallCount })) return;
       stalled = { silentMs };
       signalTree(child, "SIGTERM");
       forceKillTimer ??= setTimeout(() => signalTree(child, "SIGKILL"), 2_000);

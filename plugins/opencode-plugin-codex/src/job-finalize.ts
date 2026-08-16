@@ -51,6 +51,40 @@ export function readStreamProgress(line: string): { toolCalls: number; sessionId
   return { toolCalls: isToolCall ? 1 : 0, sessionId: typedEvent.sessionID };
 }
 
+/**
+ * No-progress watchdog thresholds and predicate.
+ *
+ * They live here, next to the finalizer that files the result, so the rule can be
+ * tested without a 45-second background job: `job-worker.ts` is an executable with a
+ * top-level `await main()` and cannot be imported.
+ */
+export const STALL_TIMEOUT_MS = 45_000;
+export const STALL_MAX_STDOUT_CHARS = 4_000;
+
+/**
+ * Is this silence a provider hang rather than slow work?
+ *
+ * Two independent conditions, and a run has to fail both to be killed:
+ *
+ * - It has produced almost nothing (under 4000 characters of stdout). Once real
+ *   output is flowing, silence is a long tool call, and killing it would throw away
+ *   work the timeout branch can still resume.
+ * - It has never made a tool call. This is the half the earlier version was missing:
+ *   a first tool call that is a build or a test run sits well under 4000 characters
+ *   for far longer than 45 seconds, and it was being SIGTERMed and filed as
+ *   `stalled` — with guidance that says a larger `timeoutMs` will not help, which is
+ *   exactly wrong for a slow build. The recorded hangs this watchdog was written for
+ *   held a 304-byte stdout with a lone `step_start` and no tool call at all.
+ */
+export function isProviderStall(params: {
+  silentMs: number;
+  stdoutChars: number;
+  toolCalls: number;
+}): boolean {
+  if (params.toolCalls > 0) return false;
+  return params.silentMs >= STALL_TIMEOUT_MS && params.stdoutChars < STALL_MAX_STDOUT_CHARS;
+}
+
 export type JobOutcome = {
   exitCode: number | null;
   signal: NodeJS.Signals | null;

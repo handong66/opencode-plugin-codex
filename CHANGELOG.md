@@ -260,13 +260,15 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   job was still on schedule.
 - **OX7** A no-progress watchdog. The background worker records `lastEventAt` on
   every chunk (persisted at most every 10s, and returned on the record), and a run
-  that has produced almost nothing (under 4000 characters) and then falls silent for
-  45s is ended early as `errorClass: "stalled"` (retryable) instead of holding its
-  whole budget. Two recorded jobs held a 304-byte stdout — one `step_start` — until
-  their budget expired, and a foreground pair burned 120000ms and 180000ms the same
-  way before the same task finished in about 15 seconds on an explicit lighter model.
-  The watchdog deliberately stops applying once real output is flowing: after that,
-  silence is a long tool call, and killing it would discard resumable work.
+  that has produced almost nothing (under 4000 characters), has **never made a tool
+  call**, and then falls silent for 45s is ended early as `errorClass: "stalled"`
+  (retryable) instead of holding its whole budget. Two recorded jobs held a 304-byte
+  stdout — one `step_start` — until their budget expired, and a foreground pair
+  burned 120000ms and 180000ms the same way before the same task finished in about
+  15 seconds on an explicit lighter model. The watchdog deliberately stops applying
+  once real output is flowing or once any tool call has been observed: after either,
+  silence is a long tool call — a build or a test run keeps stdout tiny for minutes —
+  and killing it would discard resumable work and misfile it as a provider hang.
 - **OX7** `timeout` guidance now branches on what the run actually did. Zero tool
   calls plus a spent budget is reported as a provider or model hang — raise nothing,
   change model or check the provider and proxy — while a timeout after real tool

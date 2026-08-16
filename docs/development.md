@@ -77,13 +77,16 @@ An exit code is not enough. `resultComplete` requires all of:
 - job/process state succeeded;
 - a terminal `step_finish` with reason `stop`;
 - nonempty assistant text in that same final step;
-- no structured JSONL error event.
+- no structured JSONL error event;
+- and, for `review` / `adversarial_review`, at least one tool call. A verdict reached with `toolCallCount === 0` read nothing in the workspace, so it is reported as `resultComplete: false` with a "treat as opinion, not review" warning no matter how confident the text is. Execution kinds are unaffected.
 
 Text from an earlier tool-call step remains partial. JSONL `error` events override exit code 0 and feed error classification such as `model_unauthorized` or `network_error`. Output tails are capped; `outputTruncated` means earlier content was discarded.
 
 ## Terminal records and budgets
 
-`src/job-finalize.ts` owns the terminal shape of a record. It runs once, when the stream is already complete in memory, and parses it a single time to recover `opencodeSessionId` and the event count; there is no incremental hot-path parser, because a half-written JSONL line cannot be parsed while streaming. Branch order is cancellation, timeout, spawn error, stdin error, structured JSONL error, then exit code.
+`src/job-finalize.ts` owns the terminal shape of a record. It runs once, when the stream is already complete in memory, and parses it a single time to recover `opencodeSessionId` and the event count. Branch order is cancellation, timeout, spawn error, stdin error, structured JSONL error, then exit code.
+
+There is one incremental reader on the hot path, and only one: `readStreamProgress()` (same module), which `job-worker.ts` calls per stdout chunk to enforce `maxToolCalls`. A half-written JSONL line still cannot be parsed, so the worker buffers the trailing partial line and hands `readStreamProgress()` complete lines only; it extracts nothing but the tool-call delta and the session id. Everything else about a record's shape stays in the single end-of-stream pass — do not grow this reader into a second finalizer.
 
 A `timeout` is a spent budget rather than a failed job. The record keeps the recovered session id, sets `resumable` when one exists, and its guidance routes to `opencode_continue` with a larger budget. `opencode_status` republishes `openCodeSessionId` and `resumable` so the cheapest poll carries the recovery handle. Records written before 0.2.0 have no `resumable` field and are read as false.
 

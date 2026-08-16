@@ -657,10 +657,10 @@ export class JobStore {
     }
   }
 
-  /** The status on disk right now, or undefined if there is no record yet. */
-  private async storedStatus(jobId: string): Promise<JobStatus | undefined> {
+  /** The record on disk right now, or undefined if there is no record yet. */
+  private async storedRecord(jobId: string): Promise<JobRecord | undefined> {
     try {
-      return (await this.read(jobId)).status;
+      return await this.read(jobId);
     } catch {
       return undefined;
     }
@@ -682,8 +682,24 @@ export class JobStore {
     // it as `worker_unavailable`: a completed result, discarded. The cancellation
     // sentinel below is the same rule for the one status that may always win.
     if (!isTerminalJobStatus(normalized.status)) {
-      const stored = await this.storedStatus(record.id);
-      if (stored && isTerminalJobStatus(stored)) return;
+      const stored = await this.storedRecord(record.id);
+      if (stored && isTerminalJobStatus(stored.status)) return;
+      // The same staleness, one field down. A progress write carries the record as
+      // it looked when it was read, and the worker's `record.pid = child.pid` write
+      // can land in between — replaying the snapshot then erases the only direct
+      // handle to the detached OpenCode child, which is what opencode_cancel
+      // signals first and the only route left once the worker itself is gone.
+      // Nothing in this plugin ever wants to unset a pid, so keeping a recorded one
+      // when the incoming write has none costs no legitimate behaviour.
+      if (stored) {
+        normalized = {
+          ...normalized,
+          ...(normalized.pid === undefined && stored.pid !== undefined ? { pid: stored.pid } : {}),
+          ...(normalized.workerPid === undefined && stored.workerPid !== undefined
+            ? { workerPid: stored.workerPid }
+            : {})
+        };
+      }
     }
     if (normalized.status !== "cancelled") {
       const cancelRequestedAt = await this.cancellationTimestamp(record.id);

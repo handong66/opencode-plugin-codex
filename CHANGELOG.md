@@ -122,6 +122,18 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   (`explicit` | `probe` | `cache`).
 - **OX4** Discovery failures now separate `cli_not_found` from `cli_probe_timeout`, and
   the thrown message carries the reasons (`errors[]`), not just the list of paths.
+- **Job records are monotonic** A `succeeded`, `failed` or `cancelled` record can no
+  longer be overwritten by a write that started earlier. `JobStore.write()` drops any
+  non-terminal write over a terminal record — the rule the cancellation sentinel
+  already applied to one status — and the worker serialises its progress writes and
+  awaits them before finalising. The throttled `lastEventAt` write is a
+  read-modify-write that nothing awaited, so it could land after the terminal record
+  and put `running` back over a result: the worker then exits, the next poll finds a
+  `running` record with a dead `workerPid`, and a finished job is reported as
+  `failed` / `worker_unavailable` with its result discarded. The same staleness one
+  field down is covered too — a recorded `pid` or `workerPid` survives a write that
+  carries none, so a progress write can no longer erase the handle `opencode_cancel`
+  signals to reach a detached OpenCode child directly.
 - **OX3** `opencode_status`, `opencode_result` and `opencode_cancel` no longer hardcode
   `ok: true`. `ok` now mirrors the **job's** outcome: a `failed` or `cancelled` job
   returns `ok: false` with `error: { code, message, retryable }` (the code is the

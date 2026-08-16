@@ -328,3 +328,39 @@ describe("JobStore background lifecycle", () => {
     expect(terminal.errorClass).toBe("spawn_error");
   });
 });
+
+describe("JobStore record identity", () => {
+  test("a stale progress write cannot erase the child pid", async () => {
+    const root = await tempDir();
+    const store = new JobStore(root);
+    const jobId = "job_pid_survives_progress";
+    const base = {
+      id: jobId,
+      kind: "run" as const,
+      status: "running" as const,
+      cwd: process.cwd(),
+      command: "/usr/local/bin/opencode",
+      args: ["run", "--format", "json"],
+      workerPid: 4242,
+      createdAt: "2026-08-16T00:00:00.000Z",
+      startedAt: "2026-08-16T00:00:00.000Z",
+      timeoutMs: 600_000,
+      stdoutPath: store.stdoutPath(jobId),
+      stderrPath: store.stderrPath(jobId)
+    };
+
+    // The worker records the OpenCode child's pid once, right after spawning it.
+    await store.write({ ...base, pid: 5150 });
+    // The throttled lastEventAt write is a read-modify-write, and its read can
+    // happen before that pid write lands. Replaying that snapshot used to put the
+    // record back without a pid — and opencode_cancel signals record.pid to reach
+    // the detached child directly, which is the only route left once the worker
+    // itself is gone.
+    await store.write({ ...base, lastEventAt: "2026-08-16T00:00:05.000Z" });
+
+    const stored = await store.read(jobId);
+    expect(stored.pid).toBe(5150);
+    expect(stored.workerPid).toBe(4242);
+    expect(stored.lastEventAt).toBe("2026-08-16T00:00:05.000Z");
+  });
+});

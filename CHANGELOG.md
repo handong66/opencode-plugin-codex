@@ -155,6 +155,21 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 
 ### Added
 
+- **OX6** `opencode_check` is cached for the life of the MCP server process and no
+  longer re-runs the CLI on every call: 471 recorded calls in two months, 124 of them
+  on one day, 456 of which returned the same binary, version, and provider banner.
+  Discovery, the effective-model probe, and the provider/model listings are all
+  cached; `force: true` re-reads them after a CLI install or a configuration change,
+  and the response reports `cache.providersCachedAt` / `cache.providersCacheHit`. The
+  tool description now says the result is stable for the session.
+- **OX6** Provider and model listings are returned as parsed arrays (`providers`,
+  `providerIds`, `models`) with ANSI escapes stripped, and `providersRaw`/`modelsRaw`
+  are stripped too — every one of those 471 responses used to push terminal control
+  bytes into the caller's context as content.
+- **OX6 / OX10(a)** A failing provider or model listing is no longer wrapped in
+  `ok: true`. `Provider not found: AIHubMix` arrived five times inside a successful
+  envelope, and the caller went on to submit `AIHubMix/…` jobs (five jobs, zero
+  successes) anyway; it is now `ok: false` with `error.code: "provider_listing_failed"`.
 - **OC-8** Boundary refusals are typed. `workspace_unavailable`,
   `workspace_out_of_bounds`, `file_attachment_invalid`, `private_path_blocked`,
   `rollout_invalid` and `state_write_failed` replace bare `Error` throws, each with a

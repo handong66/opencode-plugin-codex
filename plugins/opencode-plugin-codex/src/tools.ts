@@ -27,6 +27,7 @@ import {
   workspaceOutOfBounds,
   workspaceUnavailable
 } from "./boundary.js";
+import { listModels, listProviders } from "./check-cache.js";
 import {
   describeModelSelection,
   probeEffectiveModel,
@@ -536,7 +537,7 @@ export async function opencodeCheck(
 async function opencodeCheckImpl(
   args: CommonArgs & { provider?: string; includeModels?: boolean; force?: boolean }
 ) {
-  const discovered = await discoverOpenCode();
+  const discovered = await discoverOpenCode({ force: args.force });
   const warnings: string[] = [];
   const data: Record<string, unknown> = {
     opencodeBin: discovered.bin,
@@ -595,31 +596,59 @@ async function opencodeCheckImpl(
 
   if (!cwd) return envelope({ ok: true, data, warnings });
 
-  const providers = await runOpenCode(["providers", "list"], {
-    cwd,
-    opencodeBin: discovered.bin,
-    timeoutMs: 30_000
-  }).catch((error) => {
-    warnings.push(`providers list failed: ${error instanceof Error ? error.message : String(error)}`);
-    return null;
-  });
-  if (providers) data.providersRaw = providers.stdout || providers.stderr;
-  if (providers && providers.exitCode !== 0) {
-    warnings.push(`providers list exited ${providers.exitCode}: ${(providers.stderr || providers.stdout).trim()}`);
+  // Cached for the life of this MCP server process: 456 of 471 recorded check calls
+  // returned the same listing, and each one re-ran the CLI. `force` re-reads.
+  const providers = await listProviders({ opencodeBin: discovered.bin!, cwd, force: args.force }).catch(
+    (error) => {
+      warnings.push(`providers list failed: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  );
+  if (providers) {
+    data.providers = providers.lines;
+    data.providerIds = providers.ids;
+    data.providersRaw = providers.raw;
+    data.cache = { providersCachedAt: providers.cachedAt, providersCacheHit: providers.cacheHit };
+    if (providers.exitCode !== 0) {
+      // "Provider not found: AIHubMix" used to arrive inside ok:true five times, and
+      // the caller went on to submit AIHubMix/… jobs anyway.
+      const message = `providers list exited ${providers.exitCode}: ${providers.raw.trim()}`;
+      return envelope({
+        ok: false,
+        error: { code: "provider_listing_failed", message, retryable: true },
+        data,
+        warnings
+      });
+    }
   }
 
   if (args.includeModels && args.provider) {
-    const models = await runOpenCode(["models", args.provider], {
+    const models = await listModels({
+      opencodeBin: discovered.bin!,
       cwd,
-      opencodeBin: discovered.bin,
-      timeoutMs: 30_000
+      provider: args.provider,
+      force: args.force
     }).catch((error) => {
       warnings.push(`models ${args.provider} failed: ${error instanceof Error ? error.message : String(error)}`);
       return null;
     });
-    if (models) data.modelsRaw = models.stdout || models.stderr;
-    if (models && models.exitCode !== 0) {
-      warnings.push(`models ${args.provider} exited ${models.exitCode}: ${(models.stderr || models.stdout).trim()}`);
+    if (models) {
+      data.models = models.lines;
+      data.modelsRaw = models.raw;
+      data.cache = {
+        ...(data.cache as Record<string, unknown>),
+        modelsCachedAt: models.cachedAt,
+        modelsCacheHit: models.cacheHit
+      };
+      if (models.exitCode !== 0) {
+        const message = `models ${args.provider} exited ${models.exitCode}: ${models.raw.trim()}`;
+        return envelope({
+          ok: false,
+          error: { code: "provider_listing_failed", message, retryable: true },
+          data,
+          warnings
+        });
+      }
     }
   }
 

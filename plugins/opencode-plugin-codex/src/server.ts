@@ -130,11 +130,22 @@ server.registerTool(
   "opencode_check",
   {
     title: "Check OpenCode",
-    description: "Diagnose whether OpenCode CLI, provider, and optional model listing are available.",
+    description:
+      "Diagnose whether OpenCode CLI, provider, and optional model listing are available. " +
+      "The result is stable for this session: call it once at the start, not before every batch of tasks. " +
+      "Discovery, the effective model configuration, and provider/model listings are cached for the life of " +
+      "this MCP server process; pass force:true after installing a CLI or editing the OpenCode configuration.",
     inputSchema: {
       ...commonShape,
       provider: z.string().min(1).max(256).optional(),
-      includeModels: z.boolean().optional()
+      includeModels: z.boolean().optional(),
+      force: z
+        .boolean()
+        .optional()
+        .describe(
+          "Re-run discovery, the effective-model probe, and the provider/model listings instead of returning " +
+            "the cached answer. The response reports cache.providersCachedAt and cache.providersCacheHit."
+        )
     }
   },
   (args, extra) => opencodeCheck(withCodexWorkspaceRoots(args, extra._meta))

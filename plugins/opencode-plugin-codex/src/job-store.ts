@@ -461,7 +461,14 @@ export class JobStore {
   async result(
     jobId: string,
     maxChars = 20_000
-  ): Promise<{ record: JobRecord; stdout: string; stderr: string; outputSummary: JobOutputSummary }> {
+  ): Promise<{
+    record: JobRecord;
+    stdout: string;
+    stderr: string;
+    maxChars: number;
+    maxCharsClamped: boolean;
+    outputSummary: JobOutputSummary;
+  }> {
     const record = await this.status(jobId);
     const boundedMaxChars = Math.min(Math.max(maxChars, 1), MAX_RESULT_CHARS);
     const [stdout, stderr, summaryStdout, summaryStderr] = await Promise.all([
@@ -474,6 +481,11 @@ export class JobStore {
       record,
       stdout,
       stderr,
+      // The schema used to reject anything above MAX_RESULT_CHARS while the store
+      // silently clamped, so a caller widening its window got a protocol error
+      // instead of the tail it asked for. Clamp, then say what was used.
+      maxChars: boundedMaxChars,
+      maxCharsClamped: boundedMaxChars !== maxChars,
       outputSummary: summarizeOpenCodeOutput(record, summaryStdout, summaryStderr)
     };
   }

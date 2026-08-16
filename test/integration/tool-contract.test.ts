@@ -85,4 +85,15 @@ describe("published tool schemas", () => {
     expect(response.isError).toBe(true);
     expect(JSON.stringify(response.content)).toMatch(/10000/);
   });
+
+  test("documents the maxChars clamp instead of hard-refusing a larger window", async () => {
+    const client = await connect();
+    const maxChars = (await toolProperties(client, "opencode_result")).maxChars;
+
+    // The schema used to stop at 100000 while the store clamped, so a caller
+    // widening 80000 -> 100000 -> 120000 got MCP -32602 instead of a clamped tail.
+    expect(maxChars.maximum).toBeGreaterThan(100_000);
+    expect(maxChars.description ?? "").toContain("100000");
+    expect(maxChars.description ?? "").toContain("maxCharsClamped");
+  });
 });

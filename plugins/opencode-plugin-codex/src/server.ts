@@ -210,7 +210,17 @@ server.registerTool(
     description: "Read stdout/stderr tail and outputSummary for a background OpenCode job. Only outputSummary.resultComplete means OpenCode produced final text.",
     inputSchema: {
       jobId: jobIdSchema,
-      maxChars: z.number().int().positive().max(100_000).optional()
+      maxChars: z
+        .number()
+        .int()
+        .positive()
+        .max(1_000_000)
+        .optional()
+        .describe(
+          "Requested tail size per stream. The effective range is 1..100000 and the default is 20000; " +
+            "a larger request is clamped to 100000 and the response reports maxChars and maxCharsClamped. " +
+            "Widening this window is not how to reach the final answer — read outputSummary instead."
+        )
     }
   },
   opencodeResult

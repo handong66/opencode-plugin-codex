@@ -22,6 +22,12 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   survives; `outputSummary.guidance` routes to `opencode_continue` with a larger budget
   instead of "rerun with a narrower prompt", which discarded the work.
 
+- **M6** `opencode_result`'s `maxChars` no longer has two disagreeing rules. The schema
+  used to hard-reject above `100000` while the job store silently clamped, so a caller
+  widening its window (80000 → 100000 → 120000) got `MCP error -32602 … too_big` instead
+  of a tail. The schema now accepts up to `1000000`, the store clamps to `1..100000`, and
+  the response reports the effective `maxChars` and `maxCharsClamped`.
+
 ### Added
 
 - **OC-2** `JobRecord.opencodeSessionId` is recovered from the job's own output when the

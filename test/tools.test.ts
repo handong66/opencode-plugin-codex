@@ -744,3 +744,42 @@ describe("opencodeStatus", () => {
     expect(result.openCodeSessionId).toBeUndefined();
   });
 });
+
+describe("opencodeResult maxChars contract", () => {
+  test("clamps an oversized window and says so instead of failing the call", async () => {
+    const jobId = "job_maxchars_clamped";
+    const result = parseToolResult(
+      await withTempJob({ id: jobId, status: "succeeded" }, "x".repeat(2_000), "", () =>
+        opencodeResult({ jobId, maxChars: 120_000 })
+      )
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.maxChars).toBe(100_000);
+    expect(result.maxCharsClamped).toBe(true);
+  });
+
+  test("reports the effective window when the request is already in range", async () => {
+    const jobId = "job_maxchars_in_range";
+    const result = parseToolResult(
+      await withTempJob({ id: jobId, status: "succeeded" }, "x".repeat(2_000), "", () =>
+        opencodeResult({ jobId, maxChars: 5_000 })
+      )
+    );
+
+    expect(result.maxChars).toBe(5_000);
+    expect(result.maxCharsClamped).toBe(false);
+  });
+
+  test("reports the default window when maxChars is omitted", async () => {
+    const jobId = "job_maxchars_default";
+    const result = parseToolResult(
+      await withTempJob({ id: jobId, status: "succeeded" }, "x".repeat(2_000), "", () =>
+        opencodeResult({ jobId })
+      )
+    );
+
+    expect(result.maxChars).toBe(20_000);
+    expect(result.maxCharsClamped).toBe(false);
+  });
+});

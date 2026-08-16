@@ -27,6 +27,8 @@ Use `autoApprovePermissions` to request current OpenCode `--auto` behavior. It a
 
 Only `outputSummary.resultComplete === true` is a finished OpenCode conclusion. Running, queued, cancelled, failed, JSONL-error, truncated, or succeeded-without-final-text output is partial evidence. Codex must verify every finding against real files and commands.
 
+`opencode_result`'s `maxChars` has an effective range of `1..100000` (default `20000`); a larger request is clamped and reported as `maxChars` plus `maxCharsClamped: true` rather than refused. Widening the window is not how to reach a conclusion — read `outputSummary`.
+
 Background state lives in a private central user-state directory and survives MCP restarts. Keep the first returned `jobId`; status/result/cancel do not take `cwd`.
 
 `errorClass: "timeout"` is a spent budget, not a failed job: `opencode_status` returns `openCodeSessionId` and `resumable`, and a resumable session still holds the work. Records written before 0.2.0 have no `resumable` field; treat a missing value as false.

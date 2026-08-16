@@ -6,9 +6,10 @@ This document describes the current implementation. Source and tests win if docu
 
 1. `plugins/opencode-plugin-codex/src/` and tests define machine behavior.
 2. `plugins/opencode-plugin-codex/skills/opencode/SKILL.md` briefly explains tools, parameters, finality, and safety.
-3. Dong-skills `codex-opencode-collaboration` defines the full Codex-owned collaboration workflow. Its personal installed copy is synchronization output, not a second source.
+3. `plugins/opencode-plugin-codex/skills/opencode/references/failure-routing.md` is the vendored, version-bound failure-routing and polling contract. It ships inside the plugin so it can never be a release behind the code, and `test/skill-contract.test.ts` fails the build when it names an error code or result field that no longer exists in `src/`, or when any shipped document re-acquires a claim the code contradicts.
+4. Dong-skills `codex-opencode-collaboration` defines the full Codex-owned collaboration workflow. Its personal installed copy is synchronization output, not a second source.
 
-Do not copy the orchestration workflow into the plugin Skill or register the Codex orchestration Skill into OpenCode.
+Do not copy the orchestration workflow into the plugin Skill or register the Codex orchestration Skill into OpenCode. Layer 4 lives outside this repository and is not version-bound to it: anything a caller must get right in the same release as a code change belongs in layer 3, not layer 4. That asymmetry is the drift mechanism behind the 0.1-era timeout dogma.
 
 ## Build outputs
 
@@ -27,7 +28,7 @@ Both files are tracked release artifacts and must be regenerated after source ch
 2. Resolve every attachment with `realpath`; require an in-`cwd` regular file.
 3. Discover OpenCode from trusted server environment/common paths.
 4. Build argument-array flags. Send the prompt through stdin.
-5. Spawn with `CODEX_*` variables removed and a bounded stdout/stderr tail.
+5. Spawn with `CODEX_*` variables removed, capturing at most 100000 characters per stream and returning the last 20000 with `stdoutTruncated` / `stderrTruncated`. The full buffers still feed the summariser, so truncation costs nothing diagnostically. The foreground path used to be 10–50× wider than the background one for no stated reason.
 6. Parse JSONL error/step events and return `outputSummary`.
 
 ### Background
@@ -37,6 +38,8 @@ Both files are tracked release artifacts and must be regenerated after source ch
 3. The worker removes the input file after reading it, spawns OpenCode in its own process group, enforces `timeoutMs`, keeps bounded log tails, and writes partial logs while running.
 4. The worker atomically writes the terminal record. A new MCP process can read/cancel the same job by ID.
 5. Status reconciliation turns a nonterminal record with a dead worker into `failed/worker_unavailable`.
+6. `opencode_status` and `opencode_result` accept `waitMs`: the server polls the record itself (500ms backing off to 5s) until it is terminal, and returns `waited`. Any request above `240000` is clamped and the clamp is reported, because the MCP client aborts a `tools/call` at 300s. The record is re-read every round, so an `opencode_cancel` issued from another call ends the wait instead of deadlocking it. One blocking wait replaces four or five polls and their approval round-trips.
+7. `opencode_sessions` lists recent OpenCode sessions (`opencode session list --format json`) scoped to the caller's workspace roots, with `includeAllDirectories` as the explicit escape hatch. It exists so a lost `jobId` or session id has a supported recovery path instead of a raw CLI call.
 
 State directory order in the implementation (the override is primarily for tests/embedding; the shipped MCP config guarantees `HOME`):
 
@@ -45,6 +48,54 @@ State directory order in the implementation (the override is primarily for tests
 3. `~/.local/state/opencode-plugin-codex`
 
 State directories are `0700`; records, prompt inputs, and logs are `0600`. Job IDs must match `^job_[A-Za-z0-9_-]{1,128}$`. Output paths are derived from the validated ID rather than trusted from JSON.
+
+## Result envelope
+
+Since 0.2.0 every tool returns one shape:
+
+```jsonc
+{ "ok": true, "error": { "code": "…", "message": "…", "retryable": false }, "warnings": [], "data": { } }
+```
+
+`data` carries the payload — `job`, `record`, `stdout`, `stderr`, `outputSummary`, `workspace`, `effectiveModel`, `continuation`. Cheap scalars (`terminal`, `nextAction`, `waited`, `resumable`, `openCodeSessionId`, `errorClass`, `exitCode`, `maxChars`, `maxCharsClamped`, `view`, `modelSelection`, `background`, `importSucceeded`) are also mirrored at the top level for the transition. Bulk fields are deliberately not mirrored: duplicating them is what OX2 removed, and the text copy of a payload above 8192 characters is replaced by a one-line `structuredContentOnly` notice so the same bytes never travel twice.
+
+`ok` reports the **job's** outcome on `opencode_status` / `opencode_result` / `opencode_cancel`, not the query's: a `failed` or `cancelled` job answers `ok: false` with a typed `error`. `terminal: true` means the record is final and `nextAction` says to stop polling.
+
+`src/boundary.ts` owns the boundary codes. They are **returned**, never thrown, so a refusal reaches the caller as data it can route on:
+
+| Code | Retryable | Raised when |
+| --- | --- | --- |
+| `workspace_unavailable` | no | no usable MCP root or Codex workspace metadata |
+| `workspace_out_of_bounds` | no | `cwd` resolves outside every available root; the message lists the roots and explains that Codex supplies them per call |
+| `file_attachment_invalid` | no | an attachment is missing, not a regular file, or resolves outside `cwd`; the message names the remedy |
+| `private_path_blocked` | no | the prompt references a Codex private path without `allowCodexPrivatePaths`; the error carries the offset and a masked preview |
+| `rollout_invalid` | no | a transfer rollout is unreadable or outside the allowed directories |
+| `state_write_failed` | no | the state directory could not be written; carries the directory and errno |
+| `cli_not_found` | no | discovery found no OpenCode binary; carries the probed candidates |
+| `cli_probe_timeout` | yes | the discovery probe timed out — the one boundary a plain retry can fix |
+| `model_not_found` | no | an explicit provider id matches an enumerated one only in case; shares the OC-3 `errorClass` name on purpose |
+
+Codes shared with `grok-plugin-codex` (`workspace_unavailable`, `private_path_blocked`, `quota_exhausted`, `auth_required`, `network_error`, `timeout`, `terminated`) are reused verbatim so one orchestrator learns one table.
+
+`toPublicJob()` in `src/job-store.ts` is the privacy boundary between the stored record and the wire. The executable path, argv, `workerPid`, `pid`, `stdoutPath`, and `stderrPath` never leave the process; everything actionable does (`status`, timestamps, `timeoutMs`, `opencodeSessionId`, `resumable`, `lastEventAt`, `errorClass`, `errorMessage`, `modelSelection`, `toolBudgetReached`, `terminalSummary`). `test/public-job.test.ts` asserts that no argv entry, pid, or state path survives into a tool result — add fields to the projection deliberately, never by spreading the record.
+
+## Model selection
+
+`src/model-guard.ts` probes `opencode debug config` and parses **only** the root `model` and the `build`/`plan` agent `model`/`variant`. That command prints the whole resolved configuration, credentials included, so the allowlist is the security property; malformed output degrades to a warning and never refuses work.
+
+Execution results and job records carry `modelSelection { source, requested, configured, agents }`, where `source` is `opencode_config` (the caller omitted `model` — 943 of 1,051 recorded jobs) or `explicit`. An explicit value that differs from the configured default adds a warning naming both. It is a warning, not a refusal, and there is no separate authorization field: a listed model has never been proof of authorization.
+
+The probe runs on the submit path only when the caller passed an explicit `model` — with nothing requested there is nothing to compare, and an unconditional probe would add a CLI process to the common path. `opencode_check` probes unconditionally and reports `effectiveModel`.
+
+Results are cached per binary and directory for the life of the MCP server process. The cache key is built from two absolute paths joined by a space; never use a control byte for a separator, because a raw NUL makes Git treat the source file as binary and `test/source-is-text.test.ts` will fail the build.
+
+## Discovery and check cache
+
+`src/check-cache.ts` memoises CLI discovery, the effective model, and the provider/model listings for the life of the MCP server process — `opencode_check` was called 471 times in two months, 124 of them in one day. `force: true` is the escape hatch after installing a CLI or editing configuration, and every response reports `cache.providersCachedAt` and `cache.providersCacheHit` so a caller can judge freshness itself.
+
+There is no `cacheTtlMs`, on purpose. What invalidates this answer is a user installing a CLI or editing a config file, which no interval predicts; publishing a TTL the plugin does not enforce would be a false promise.
+
+Listings are parsed into arrays with ANSI escapes stripped by `src/ansi.ts`, and a listing that exits non-zero is `ok: false` with `provider_listing_failed` instead of a `Provider not found` message wrapped inside a success. Once providers have been enumerated, an explicit model whose provider id differs from an enumerated one only in case is refused before the job starts, with the correct spelling in `details.knownProviders`. The plugin never rewrites the id itself — silent normalisation was rejected.
 
 ## OpenCode CLI contract
 
@@ -84,11 +135,15 @@ Text from an earlier tool-call step remains partial. JSONL `error` events overri
 
 ## Terminal records and budgets
 
-`src/job-finalize.ts` owns the terminal shape of a record. It runs once, when the stream is already complete in memory, and parses it a single time to recover `opencodeSessionId` and the event count. Branch order is cancellation, timeout, spawn error, stdin error, structured JSONL error, then exit code.
+`src/job-finalize.ts` owns the terminal shape of a record. It runs once, when the stream is already complete in memory, and parses it a single time to recover `opencodeSessionId` and the event count. Branch order is cancellation, **stall**, timeout, spawn error, stdin error, structured JSONL error, then exit code. Cancellation stays first so a cancelled job can never be recorded as a success; the stall branch sits ahead of timeout because a stalled run is ended before its budget expires, and only checks itself when the run did not also time out.
+
+Every terminal branch writes `terminalSummary` onto the record — state, `resultComplete`, a bounded `finalTextPreview`, `permissionDenied`, `deniedPaths`, and the evidence counters — so a finished job stays diagnosable from `opencode_status` alone after its logs are rotated away.
 
 There is one incremental reader on the hot path, and only one: `readStreamProgress()` (same module), which `job-worker.ts` calls per stdout chunk to enforce `maxToolCalls`. A half-written JSONL line still cannot be parsed, so the worker buffers the trailing partial line and hands `readStreamProgress()` complete lines only; it extracts nothing but the tool-call delta and the session id. Everything else about a record's shape stays in the single end-of-stream pass — do not grow this reader into a second finalizer.
 
-A `timeout` is a spent budget rather than a failed job. The record keeps the recovered session id, sets `resumable` when one exists, and its guidance routes to `opencode_continue` with a larger budget. `opencode_status` republishes `openCodeSessionId` and `resumable` so the cheapest poll carries the recovery handle. Records written before 0.2.0 have no `resumable` field and are read as false.
+A `timeout` is a spent budget rather than a failed job. The record keeps the recovered session id, sets `resumable` when one exists, and its guidance routes to `opencode_continue` with a larger budget. `opencode_status` republishes `openCodeSessionId` and `resumable` so the cheapest poll carries the recovery handle. Records written before 0.2.0 have no `resumable` field and are read as false. Timeout guidance splits on `toolCallCount`: a timeout with zero tool calls is a provider or model hang, not a budget that was too small.
+
+`errorClass: "stalled"` is the opposite case and comes from the no-progress watchdog in `src/job-worker.ts`. The worker records `lastEventAt` on the record (persisted with throttling, published through `toPublicJob`) and ends a run that has emitted **under 4000 characters** of stdout and then gone silent for 45s. Both bounds matter: after real output, 45s of silence is a long tool call, and killing it would discard work the timeout branch could have resumed. The recorded stalls held a 304-byte stdout until their whole budget expired. A stall is retryable and its guidance points at the model, provider, or proxy rather than at a larger `timeoutMs`.
 
 `src/timeout-budget.ts` owns the budget policy: floor `10000`, ceiling `86400000`, default `600000`, foreground clamp `240000`, and the per-kind p90 table with its sample sizes and measurement window. Warnings from it are advisory and never refuse a call.
 

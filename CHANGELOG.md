@@ -105,6 +105,13 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 
 ### Added
 
+- **OC-6** `waitMs` on `opencode_status` and `opencode_result`. The server now blocks
+  until the record is terminal (backing off 500ms → 5s, re-reading the record each
+  round so an `opencode_cancel` from elsewhere ends the wait) and reports `waited`.
+  Any request above `240000` is clamped to `240000` and the clamp is reported, because
+  the MCP client aborts a `tools/call` at 300s. Polling was previously the only option:
+  3,819 poll rounds across 685 jobs, at a median interval of 36s against a median job
+  time of 99s.
 - **OX3** `terminal: boolean` and `nextAction: string` on `opencode_status`,
   `opencode_result` and `opencode_cancel`. A terminal record says
   `do not poll again; the record is final`; a live one says to wait and not to call

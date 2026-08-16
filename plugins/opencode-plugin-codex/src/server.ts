@@ -68,6 +68,24 @@ const commonShape = {
 const jobIdSchema = z.string().regex(/^job_[A-Za-z0-9_-]{1,128}$/);
 
 /**
+ * Server-side wait. 3,819 poll rounds over 685 jobs came from having no way to ask
+ * the server to wait: each round was a full request/response, and in goal mode each
+ * one also cost an approval evaluation.
+ */
+const waitMsSchema = z
+  .number()
+  .int()
+  .min(0)
+  .max(3_600_000)
+  .optional()
+  .describe(
+    "Block until the job is terminal, up to this many milliseconds (default 0: return immediately). " +
+      "Any request above 240000 is clamped to 240000 and reported in warnings[], because the MCP client " +
+      "aborts a tools/call at 300s. The record is re-read every round, so an opencode_cancel from elsewhere " +
+      "ends the wait. The response reports waited (ms) and terminal."
+  );
+
+/**
  * Wall-clock was the only budget: 86 timed-out job logs hold 1,360 tool calls
  * (median 13, p90 37, max 81) against 202 text events, and one job made 53 tool
  * calls and produced no text at all. Reaching this ceiling does not kill the job.
@@ -236,7 +254,8 @@ server.registerTool(
     title: "OpenCode Job Status",
     description: "Read a background OpenCode job record.",
     inputSchema: {
-      jobId: jobIdSchema
+      jobId: jobIdSchema,
+      waitMs: waitMsSchema
     }
   },
   opencodeStatus
@@ -252,6 +271,7 @@ server.registerTool(
       "Only outputSummary.resultComplete means OpenCode produced final text.",
     inputSchema: {
       jobId: jobIdSchema,
+      waitMs: waitMsSchema,
       view: z
         .enum(["raw", "final"])
         .optional()

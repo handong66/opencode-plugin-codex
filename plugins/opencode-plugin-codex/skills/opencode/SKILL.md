@@ -43,6 +43,8 @@ A foreground call returns at most the last 20000 characters of each stream (capt
 
 `opencode_status`, `opencode_result`, and `opencode_cancel` return `ok` for the **job's** outcome, not the query's: a `failed` or `cancelled` job returns `ok: false` with `error: { code, message, retryable }`. `terminal: true` means the record is final — `nextAction` then reads `do not poll again; the record is final`, and polling a job that has been terminal for over five minutes adds a warning. A non-terminal job's `nextAction` says to wait, and never to call status and result at the same instant.
 
+`opencode_status` and `opencode_result` accept `waitMs`: the server blocks until the record is terminal instead of returning immediately. The default is `0`, any request above `240000` is clamped to `240000` and reported in `warnings[]` (the MCP client aborts a `tools/call` at 300s), and the response reports `waited` in milliseconds. The record is re-read every round, so an `opencode_cancel` issued elsewhere ends the wait.
+
 Background state lives in a private central user-state directory and survives MCP restarts. Keep the first returned `jobId`; status/result/cancel do not take `cwd`.
 
 `errorClass` is derived only from real error channels (timeout, terminating signal, structured JSONL error, stderr), never from OpenCode's own prose. `quota_exhausted`, `auth_required`, `model_unauthorized`, and `model_not_found` are not retryable: rerunning the same call reaches the same answer, so change provider, model, or account instead. `timeout`, `terminated`, `rate_limited`, `network_error`, `opencode_failed`, and `unknown` are retryable. An unrecognised provider message is reported as `unknown` with the full text rather than filed under a guessed class.

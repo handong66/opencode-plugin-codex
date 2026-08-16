@@ -686,28 +686,84 @@ function jobOutcomeEnvelope(job: JobRecord): {
   return { ok: true, terminal, nextAction, warnings };
 }
 
-export async function opencodeStatus(args: { jobId: string }) {
+/**
+ * Hard ceiling on a server-side wait, whatever the caller asks for.
+ *
+ * Codex aborts a `tools/call` at 300s — six recorded aborts land at 299.999999875s —
+ * so a wait that could outlive that would only turn a poll into a lost call.
+ */
+export const MAX_WAIT_MS = 240_000;
+const WAIT_POLL_MIN_MS = 500;
+const WAIT_POLL_MAX_MS = 5_000;
+
+/**
+ * Block until the job is terminal or the budget runs out.
+ *
+ * Polling was the only option a caller had: 3,819 poll rounds across 685 jobs, at a
+ * median interval of 36s against a median job time of 99s. Each round re-reads the
+ * record from disk, so an `opencode_cancel` issued elsewhere ends the wait too.
+ */
+async function waitForTerminal(
+  store: JobStore,
+  jobId: string,
+  requestedWaitMs: number | undefined
+): Promise<{ job: JobRecord; waited: number; warnings: string[] }> {
+  const warnings: string[] = [];
+  let job = await store.status(jobId);
+  if (requestedWaitMs === undefined || requestedWaitMs <= 0) {
+    return { job, waited: 0, warnings };
+  }
+  const budget = Math.min(requestedWaitMs, MAX_WAIT_MS);
+  if (requestedWaitMs > MAX_WAIT_MS) {
+    warnings.push(
+      `waitMs=${requestedWaitMs} was clamped to ${MAX_WAIT_MS}: the MCP client aborts a tools/call at 300s, ` +
+        "so a longer server-side wait would lose the call rather than return the record."
+    );
+  }
+  const startedAt = Date.now();
+  let delay = WAIT_POLL_MIN_MS;
+  while (!TERMINAL_JOB_STATUSES.has(job.status)) {
+    const remaining = budget - (Date.now() - startedAt);
+    if (remaining <= 0) break;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(delay, remaining)));
+    delay = Math.min(delay * 2, WAIT_POLL_MAX_MS);
+    job = await store.status(jobId);
+  }
+  return { job, waited: Date.now() - startedAt, warnings };
+}
+
+export async function opencodeStatus(args: { jobId: string; waitMs?: number }) {
   const store = new JobStore();
-  const job = await store.status(args.jobId);
+  const { job, waited, warnings: waitWarnings } = await waitForTerminal(store, args.jobId, args.waitMs);
+  const envelope = jobOutcomeEnvelope(job);
   // The cheapest and most-called poll must carry the recovery handle; before this
   // a caller had to fetch the full result to learn a timed-out job was resumable.
   return jsonText({
-    ...jobOutcomeEnvelope(job),
+    ...envelope,
+    warnings: [...waitWarnings, ...envelope.warnings],
     job,
+    waited,
     openCodeSessionId: job.opencodeSessionId,
     resumable: job.resumable === true
   });
 }
 
-export async function opencodeResult(args: { jobId: string; maxChars?: number; view?: JobResultView }) {
+export async function opencodeResult(args: {
+  jobId: string;
+  maxChars?: number;
+  view?: JobResultView;
+  waitMs?: number;
+}) {
   const store = new JobStore();
+  const { waited, warnings: waitWarnings } = await waitForTerminal(store, args.jobId, args.waitMs);
   const result = await store.result(args.jobId, args.maxChars, args.view);
   const envelope = jobOutcomeEnvelope(result.record);
   return jsonText({
     ...envelope,
     ...result,
+    waited,
     // Evidence warnings about the run itself belong next to the polling warnings.
-    warnings: [...envelope.warnings, ...result.outputSummary.warnings]
+    warnings: [...waitWarnings, ...envelope.warnings, ...result.outputSummary.warnings]
   });
 }
 

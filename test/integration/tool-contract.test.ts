@@ -129,6 +129,21 @@ describe("published tool schemas", () => {
     expect((await toolProperties(client, "opencode_continue")).maxToolCalls).toBeUndefined();
   });
 
+  test("publishes a server-side wait on both polling tools", async () => {
+    const client = await connect();
+
+    // Without it the only strategy is busy polling: 3,819 rounds over 685 jobs, and
+    // in goal mode every round also costs an approval evaluation.
+    for (const toolName of ["opencode_status", "opencode_result"]) {
+      const property = (await toolProperties(client, toolName)).waitMs;
+
+      expect(property, toolName).toBeDefined();
+      expect(property.type, toolName).toBe("integer");
+      expect(property.minimum, toolName).toBe(0);
+      expect(property.description ?? "", toolName).toContain("240000");
+    }
+  });
+
   test("documents the maxChars clamp instead of hard-refusing a larger window", async () => {
     const client = await connect();
     const maxChars = (await toolProperties(client, "opencode_result")).maxChars;

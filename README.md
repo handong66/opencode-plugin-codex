@@ -32,6 +32,7 @@ Important parameters and boundaries:
 - A foreground call returns the last `20000` characters of each stream (captured at `100000`) with `stdoutTruncated`/`stderrTruncated`; the complete buffers still feed `outputSummary`.
 - Background state is stored in the user's private state area (normally `~/.local/state/opencode-plugin-codex`). Directories use mode `0700`; job, input, and log files use `0600`.
 - Status/result/cancel use only the returned `jobId`. An independent worker owns the OpenCode process, timeout, bounded logs, cancellation, and terminal state so MCP restarts do not lose control.
+- `opencode_status` and `opencode_result` accept `waitMs` and block until the record is terminal. The default is `0`; a request above `240000` is clamped to `240000` and reported in `warnings[]`, because the MCP client aborts a `tools/call` at 300s. The response reports `waited`, and each round re-reads the record so a cancellation from elsewhere ends the wait.
 
 Only `outputSummary.resultComplete === true` is a finished OpenCode answer. Running, queued, cancelled, failed, JSONL-error, truncated, or succeeded-without-final-text results are partial evidence. Codex must verify every accepted finding against current files and commands.
 

@@ -111,6 +111,24 @@ describe("published tool schemas", () => {
     }
   });
 
+  test("publishes the tool-call ceiling where the worker can enforce it", async () => {
+    const client = await connect();
+
+    // Enforced by the background worker, which interrupts the run and asks the same
+    // session for its answer. opencode_continue is deliberately outside that surface.
+    for (const toolName of ["opencode_run", "opencode_rescue", "opencode_review", "opencode_adversarial_review"]) {
+      const property = (await toolProperties(client, toolName)).maxToolCalls;
+
+      expect(property, toolName).toBeDefined();
+      expect(property.type, toolName).toBe("integer");
+      expect(property.minimum, toolName).toBe(1);
+      expect(property.maximum, toolName).toBe(500);
+      expect(property.description ?? "", toolName).toMatch(/does not kill the job/i);
+      expect(property.description ?? "", toolName).toMatch(/background is true/i);
+    }
+    expect((await toolProperties(client, "opencode_continue")).maxToolCalls).toBeUndefined();
+  });
+
   test("documents the maxChars clamp instead of hard-refusing a larger window", async () => {
     const client = await connect();
     const maxChars = (await toolProperties(client, "opencode_result")).maxChars;

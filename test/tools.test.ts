@@ -401,6 +401,41 @@ describe("timeout budget warnings", () => {
   });
 });
 
+describe("maxToolCalls on the foreground path", () => {
+  test("says the ceiling was ignored instead of dropping it silently", async () => {
+    // The ceiling is enforced by the background worker, which can interrupt the run
+    // and ask the same session for its answer; a foreground call has no such seam.
+    // Silently accepting the parameter is the exact behaviour the ruling avoided:
+    // the caller would believe the run was bounded when only wall-clock was.
+    await withFakeOpenCode(async () => {
+      const result = parseToolResult(
+        await opencodeRun({
+          cwd: process.cwd(),
+          background: false,
+          maxToolCalls: 3,
+          prompt: "foreground ceiling probe"
+        })
+      );
+
+      expect(result.ok).toBe(true);
+      const ignored = (result.warnings ?? []).filter((warning) => /maxToolCalls=3 is ignored/.test(warning));
+      expect(ignored).toHaveLength(1);
+      expect(ignored[0]).toMatch(/background:false/);
+      expect(ignored[0]).toMatch(/background:true/);
+    });
+  });
+
+  test("stays silent when the caller did not ask for a ceiling", async () => {
+    await withFakeOpenCode(async () => {
+      const result = parseToolResult(
+        await opencodeRun({ cwd: process.cwd(), background: false, prompt: "no ceiling probe" })
+      );
+
+      expect((result.warnings ?? []).some((warning) => /maxToolCalls/.test(warning))).toBe(false);
+    });
+  });
+});
+
 describe("opencodeAdversarialReview", () => {
   test("keeps security/path boundary reviews bounded and prevents security scan escalation", async () => {
     await withFakeOpenCode(async () => {

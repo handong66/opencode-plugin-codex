@@ -7,6 +7,15 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 
 ### Changed
 
+- **Release metadata** `package.json`, `.codex-plugin/plugin.json` and the MCP `serverInfo`
+  now all report `0.2.0`. They disagreed for the whole 0.1 era (`0.1.0` vs
+  `0.1.0+codex.20260710103034`), so a caller could not pin the contract by version — and
+  since the `timeoutMs` floor below is a wire-level refusal, shipping it under `0.1.0`
+  would have advertised a contract the code no longer honours. The manifest's local
+  cachebuster is now build metadata only: `npm run validate:plugin` and
+  `test/version-sync.test.ts` fail when the release core in front of `+` is not the
+  version that was built.
+
 - **OC-1** `timeoutMs` is now a documented budget instead of a bare positive integer.
   The schema accepts `10000..86400000` (was: any positive integer up to `86400000`), so
   budgets too small to finish an OpenCode job are refused at the schema layer, while the

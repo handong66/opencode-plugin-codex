@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -54,6 +54,17 @@ afterEach(async () => {
 });
 
 describe("published tool schemas", () => {
+  test("serverInfo advertises the same version the repository ships", async () => {
+    const client = await connect();
+    const packageVersion = (
+      JSON.parse(await readFile(join(process.cwd(), "package.json"), "utf8")) as { version: string }
+    ).version;
+
+    // A caller that pins by version reads this string, not package.json; when the two
+    // disagree the published timeout/maxChars contract cannot be pinned at all.
+    expect(client.getServerVersion()?.version).toBe(packageVersion);
+  });
+
   test("every execution tool publishes the same timeout floor, ceiling, and budget guidance", async () => {
     const client = await connect();
 

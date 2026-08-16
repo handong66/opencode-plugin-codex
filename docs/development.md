@@ -133,7 +133,11 @@ Live transfer is opt-in and must use a known authorized model. The script uses a
 
 Follow the current plugin-creator update flow:
 
-1. Run `update_plugin_cachebuster.py` against the plugin directory.
+1. Run `update_plugin_cachebuster.py` against the plugin directory. It may only append
+   `+codex.<timestamp>` build metadata; the release core in front of `+` must stay equal to
+   `package.json`. `npm run validate:plugin` and `test/version-sync.test.ts` enforce that, together
+   with the MCP `serverInfo` version in `src/server.ts`, so an installed plugin can never advertise
+   a version whose tool contract it no longer implements. Bump all three together when the contract changes.
 2. Read the configured marketplace name with the plugin-creator helper.
 3. Reinstall with `codex plugin add <plugin>@<marketplace>`.
 4. Verify skills/tools in a new Codex task.

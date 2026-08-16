@@ -16,6 +16,7 @@ import { toOpenCodeSession } from "./opencode-session.js";
 import {
   JobStore,
   summarizeOpenCodeOutput,
+  toPublicJob,
   type JobRecord,
   type JobResultView
 } from "./job-store.js";
@@ -456,7 +457,7 @@ async function runOrStartJob(params: {
     });
     return envelope({
       ok: true,
-      data: { background: true, job, modelSelection: selection.modelSelection },
+      data: { background: true, job: toPublicJob(job), modelSelection: selection.modelSelection },
       warnings
     });
   }
@@ -1039,7 +1040,7 @@ async function opencodeStatusImpl(args: { jobId: string; waitMs?: number }) {
     data: {
       terminal: outcome.terminal,
       nextAction: outcome.nextAction,
-      job,
+      job: toPublicJob(job),
       waited,
       openCodeSessionId: job.opencodeSessionId,
       resumable: job.resumable === true
@@ -1072,6 +1073,7 @@ async function opencodeResultImpl(args: ResultArgs) {
       terminal: outcome.terminal,
       nextAction: outcome.nextAction,
       ...result,
+      record: toPublicJob(result.record),
       waited
     }
   });
@@ -1089,6 +1091,6 @@ async function opencodeCancelImpl(args: { jobId: string }) {
     ok: outcome.ok,
     error: outcome.error,
     warnings: outcome.warnings,
-    data: { terminal: outcome.terminal, nextAction: outcome.nextAction, job }
+    data: { terminal: outcome.terminal, nextAction: outcome.nextAction, job: toPublicJob(job) }
   });
 }

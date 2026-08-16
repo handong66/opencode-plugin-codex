@@ -55,6 +55,8 @@ A foreground call returns at most the last 20000 characters of each stream (capt
 
 `opencode_status` and `opencode_result` accept `waitMs`: the server blocks until the record is terminal instead of returning immediately. The default is `0`, any request above `240000` is clamped to `240000` and reported in `warnings[]` (the MCP client aborts a `tools/call` at 300s), and the response reports `waited` in milliseconds. The record is re-read every round, so an `opencode_cancel` issued elsewhere ends the wait.
 
+`data.job` and `data.record` are projections, not the stored record: the executable path, argv, pids, and state log paths are not returned. Everything actionable is (`status`, timestamps, `timeoutMs`, `opencodeSessionId`, `resumable`, `errorClass`, `errorMessage`, `modelSelection`, `toolBudgetReached`).
+
 Background state lives in a private central user-state directory and survives MCP restarts. Keep the first returned `jobId`; status/result/cancel do not take `cwd`.
 
 `errorClass` is derived only from real error channels (timeout, terminating signal, structured JSONL error, stderr), never from OpenCode's own prose. `quota_exhausted`, `auth_required`, `model_unauthorized`, and `model_not_found` are not retryable: rerunning the same call reaches the same answer, so change provider, model, or account instead. `timeout`, `terminated`, `rate_limited`, `network_error`, `opencode_failed`, and `unknown` are retryable. An unrecognised provider message is reported as `unknown` with the full text rather than filed under a guessed class.

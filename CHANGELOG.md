@@ -36,6 +36,16 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
     `network_error`, `opencode_failed`, `cli_probe_timeout`, `unknown` are.
   - A failed foreground run now also carries `error`, matching what `opencode_status`
     already did for background jobs.
+- **OX5 (breaking)** Job records are projected before they cross the wire.
+  `opencode_status` used to return the resolved executable path, the complete argv
+  (including `--model`), `workerPid`, `pid`, and the absolute
+  `~/.local/state/...` log paths; a recorded response shows all of it. `data.job` and
+  `data.record` now carry only `id`, `kind`, `status`, `cwd`, the timestamps,
+  `timeoutMs`, `maxToolCalls`, `toolBudgetReached`, `opencodeSessionId`,
+  `modelSelection`, `resumable`, `exitCode`, `signal`, `errorClass`, `errorMessage`,
+  `cancelRequestedAt` and `outputTruncated`. The projection matches
+  grok-plugin-codex's `toPublicJob()`, field names included, and a test asserts no
+  argv entry, pid, or state path appears in a tool result.
 
 ### Changed
 

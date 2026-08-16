@@ -70,6 +70,73 @@ export type JobRecord = {
   stderrPath: string;
 };
 
+/**
+ * What a caller is allowed to see of a job record.
+ *
+ * `opencode_status` used to return the whole record: the resolved executable path,
+ * the complete argv (including `--model`), `workerPid`, `pid`, and the absolute
+ * `~/.local/state/...` log paths. A recorded status response shows all of it. The
+ * sibling plugin has projected its records since 0.2 and documents that as a
+ * boundary; the field names here are the same ones.
+ */
+export type PublicJobRecord = Pick<
+  JobRecord,
+  | "id"
+  | "kind"
+  | "status"
+  | "cwd"
+  | "createdAt"
+  | "startedAt"
+  | "finishedAt"
+  | "timeoutMs"
+  | "maxToolCalls"
+  | "toolBudgetReached"
+  | "opencodeSessionId"
+  | "modelSelection"
+  | "resumable"
+  | "exitCode"
+  | "signal"
+  | "errorClass"
+  | "errorMessage"
+  | "cancelRequestedAt"
+  | "outputTruncated"
+>;
+
+const PUBLIC_JOB_FIELDS = [
+  "id",
+  "kind",
+  "status",
+  "cwd",
+  "createdAt",
+  "startedAt",
+  "finishedAt",
+  "timeoutMs",
+  "maxToolCalls",
+  "toolBudgetReached",
+  "opencodeSessionId",
+  "modelSelection",
+  "resumable",
+  "exitCode",
+  "signal",
+  "errorClass",
+  "errorMessage",
+  "cancelRequestedAt",
+  "outputTruncated"
+] as const satisfies readonly (keyof PublicJobRecord)[];
+
+/**
+ * Project a record for the wire. `command`, `args`, `workerPid`, `pid`,
+ * `stdoutPath` and `stderrPath` stay inside the plugin: the worker needs them, the
+ * caller does not, and `cwd` is already the caller's own input.
+ */
+export function toPublicJob(record: JobRecord): PublicJobRecord {
+  const projected: Record<string, unknown> = {};
+  for (const field of PUBLIC_JOB_FIELDS) {
+    if (record[field] !== undefined) projected[field] = record[field];
+  }
+  return projected as PublicJobRecord;
+}
+
 export type JobOutputSummary = {
   resultComplete: boolean;
   state:

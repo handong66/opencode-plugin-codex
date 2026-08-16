@@ -127,8 +127,14 @@ describe("maxToolCalls", () => {
 
     // The record must name the process that actually ran the answer pass. The first
     // child was SIGTERMed before it started, so a record still pointing at it leaves
-    // a detached OpenCode session nothing outside the worker can signal.
-    expect(result.record.pid).toBe(passes[1].pid);
-    expect(result.record.pid).not.toBe(passes[0].pid);
+    // a detached OpenCode session nothing outside the worker can signal. `pid` is an
+    // internal field since OX5, so this reads the stored record, not the wire.
+    const stored = JSON.parse(await readFile(join(stateDir, "jobs", `${jobId}.json`), "utf8")) as {
+      pid?: number;
+    };
+    expect(stored.pid).toBe(passes[1].pid);
+    expect(stored.pid).not.toBe(passes[0].pid);
+    // And the wire never carries it.
+    expect(JSON.stringify(result)).not.toContain(String(passes[1].pid));
   }, 30_000);
 });

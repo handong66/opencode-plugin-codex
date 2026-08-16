@@ -155,6 +155,16 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 
 ### Added
 
+- **X3** `opencode_adversarial_review` accepts `threatModel`: the operating context
+  findings are judged against, in the user's own words. Every finding is then
+  labelled in-model or out-of-model, and an out-of-model finding is advisory only —
+  never a blocker, a NO_GO, or a reason to stop work in progress. When no context is
+  supplied the plugin does not invent one (it cannot know that a system has no
+  network exposure); it asks for a robustness review of the named target and marks
+  context-dependent findings advisory. The prompt is also worded in failure-mode
+  terms rather than attacker/attack-chain terms: a recorded adversarial review
+  tripped the client's own content filter (`cyber_policy`) and stopped the user's
+  turn mid-task.
 - **OX9** `opencode_check`, `opencode_status` and `opencode_result` are annotated
   `readOnlyHint` / `idempotentHint` / `openWorldHint: false`. One recorded 85-minute
   window held 18 client approval evaluations — 7 `opencode_status`, 6

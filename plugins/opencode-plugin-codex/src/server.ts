@@ -256,6 +256,17 @@ server.registerTool(
     inputSchema: {
       ...commonShape,
       target: z.string().min(1).max(16_384).optional(),
+      threatModel: z
+        .string()
+        .min(1)
+        .max(2_000)
+        .optional()
+        .describe(
+          "The operating context findings are judged against, in the user's own terms " +
+            "(for example: single-user local application, no network exposure). Every finding is then labelled " +
+            "in-model or out-of-model, and an out-of-model finding is advisory only — never a blocker, a NO_GO, " +
+            "or a reason to stop work in progress. Supply it whenever the user has stated one."
+        ),
       background: z.boolean().optional(),
       timeoutMs: timeoutSchema,
       maxToolCalls: maxToolCallsSchema

@@ -41,6 +41,10 @@ Use `autoApprovePermissions` to request current OpenCode `--auto` behavior on `o
 
 A job with `outputSummary.permissionDenied === true` inspected less than it was asked to, whatever its status. Never report such a job as "OpenCode found no problems": absence of findings there is absence of access. `deniedPaths` lists what it could not reach (capped at 5); the first remedy is a `cwd` that already contains those paths, not wider permissions.
 
+## Adversarial review scope
+
+Pass `threatModel` to `opencode_adversarial_review` whenever the user has stated one (for example "single-user local application; no network exposure"). Every finding then carries an in-model or out-of-model label, and an out-of-model finding is advisory: it must not be reported as a blocker or a NO_GO, and must not interrupt verification already in progress. Without a `threatModel` the review stays a robustness review of the named target and does not escalate into a security audit.
+
 ## Result and safety gates
 
 `outputSummary` reports what the run actually did: `toolCallCount`, `filesInspected`, `turnsUsed`, `skillsLoaded[]`, and the derived `evidenceLevel` (`none` | `thin` | `substantive`). A `review` or `adversarial_review` that made zero tool calls is reported as `resultComplete: false` with the warning `verdict produced with 0 tool calls — treat as opinion, not review`; never count it as a passing vote. `outputSummary.warnings[]` also names any interactive skill a headless delegation loaded.

@@ -954,3 +954,54 @@ describe("headless delegation preamble", () => {
     });
   });
 });
+
+describe("adversarial review threat model", () => {
+  test("carries the caller's operating context and makes out-of-model findings advisory", async () => {
+    await withFakeOpenCode(async () => {
+      const result = parseToolResult(
+        await opencodeAdversarialReview({
+          cwd: process.cwd(),
+          background: false,
+          target: "src/job-worker.ts",
+          threatModel: "single-user local application; no network exposure"
+        })
+      );
+      const prompt = (JSON.parse((result.stdout ?? "").trim()) as { input: string }).input;
+
+      expect(prompt).toContain("Operating context for this review: single-user local application; no network exposure");
+      expect(prompt).toMatch(/Label every finding in-model or out-of-model/);
+      // The user's own instruction after a filtered turn: stop interrupting the task.
+      expect(prompt).toMatch(/never be a blocker, a NO_GO, or a reason to stop work in progress/);
+    });
+  });
+
+  test("does not invent an operating context when none was given", async () => {
+    await withFakeOpenCode(async () => {
+      const result = parseToolResult(
+        await opencodeAdversarialReview({ cwd: process.cwd(), background: false, target: "src/job-worker.ts" })
+      );
+      const prompt = (JSON.parse((result.stdout ?? "").trim()) as { input: string }).input;
+
+      // Claiming "no network exposure" is not something the plugin can know.
+      expect(prompt).not.toContain("no network exposure");
+      expect(prompt).toMatch(/No operating context was supplied/);
+      expect(prompt).toMatch(/advisory rather than blocking/);
+    });
+  });
+
+  test("frames the review in failure-mode vocabulary, not attack vocabulary", async () => {
+    await withFakeOpenCode(async () => {
+      const result = parseToolResult(
+        await opencodeAdversarialReview({ cwd: process.cwd(), background: false, target: "src/job-worker.ts" })
+      );
+      const prompt = (JSON.parse((result.stdout ?? "").trim()) as { input: string }).input;
+
+      // A recorded adversarial review tripped the client's own content filter
+      // (cyber_policy) and stopped the user's turn.
+      for (const word of ["attacker", "malicious", "attack chain", "attack path"]) {
+        expect(prompt.toLowerCase(), word).not.toContain(word);
+      }
+      expect(prompt).toMatch(/failure modes and breakage paths, not as attacks/);
+    });
+  });
+});

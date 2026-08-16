@@ -19,11 +19,12 @@ git diff --check
 
 ### 0.2.0 — 2026-08-16 (OpenCode CLI 1.18.16, Node v25.9.0, macOS)
 
-- `npm test`: 31 files, 228 tests passed.
-- `npm run check`: build, typecheck, unit suite, repository plugin validation, and the
-  MCP smoke (11 tools) passed.
-- `npm run test:integration`: background lifecycle, workspace roots, tool contract,
-  and tool-call budget suites passed against the built `dist/`.
+- `npm test`: 33 files, 263 tests passed.
+- `npm run check`: build, typecheck, the unit suite (33 files, 263 tests), repository
+  plugin validation, and the MCP smoke (11 tools) passed. `git status --porcelain` was
+  empty after the build, so the committed `dist/` matches `src/`.
+- `npm run test:integration`: 4 files, 15 tests passed against the built `dist/` —
+  background lifecycle, workspace roots, tool contract, and tool-call budget.
 - CI: `.github/workflows/pull-request-ci.yml` runs `npm run check` and
   `npm run test:integration` on ubuntu-latest and macos-latest for pull requests and
   `release/**` pushes. Before this the repository had no CI at all and every gate ran
@@ -33,6 +34,10 @@ git diff --check
 - Live OpenCode CLI smokes (`npm run smoke:opencode-cli`, `npm run smoke:background`,
   `npm run smoke:live-transfer`) are not part of this record: they call the real CLI
   and provider, and this release was verified without spending provider quota.
+- Not covered by any suite here: the no-progress watchdog assumes OpenCode emits a
+  tool event when a tool call *starts*. If a provider only emits on completion, a slow
+  first tool call is still invisible to it. Confirm with one live
+  `npm run smoke:background` run before publishing.
 
 ### 0.1.0 — 2026-07-10 (OpenCode CLI 1.17.15)
 
@@ -68,11 +73,41 @@ Final workspace-boundary review job `job_1783679182891_59f757d2` also completed 
 
 ## Background contract
 
-Background jobs run in an independent worker with private central state. A new MCP process can use the original `jobId` for status, result, and cancellation. `timeoutMs` is enforced by the worker; missing workers reconcile to `worker_unavailable`; cancellation has durable precedence over stale worker writes; and prompt input is removed after it is read. Only `outputSummary.resultComplete === true` is a final OpenCode conclusion.
+Background jobs run in an independent worker with private central state. A new MCP process can use the original `jobId` for status, result, and cancellation. `timeoutMs` is enforced by the worker, with one published exception: a job that reaches `maxToolCalls` runs a final-answer pass with a 30000ms floor and can therefore finish up to 30s late. Missing workers reconcile to `worker_unavailable`; a terminal record can no longer be overwritten by a write that started earlier; cancellation has durable precedence over stale worker writes; and prompt input is removed after it is read. Only `outputSummary.resultComplete === true` is a final OpenCode conclusion.
 
-## Installed plugin pickup
+## Installed plugin pickup — run this before publishing
 
-After a cachebuster update and `codex plugin add opencode-plugin-codex@opencode-plugin-codex`, verify from a new Codex task that the built-in Skill is current, all tools are discoverable (11 as of 0.2.0), the current schemas are present, and `opencode_check` accepts the project root supplied by current Codex per-call workspace metadata when standard MCP roots are empty. The check must discover the installed OpenCode CLI without calling a model. Record the date, the plugin version picked up, and the CLI version each time.
+Everything above was verified from the repository checkout. This step is the one
+gate the repository cannot run for itself: it proves that what an installed cache
+serves is what was built here. **Do not publish a release until it has passed and
+been recorded below.**
+
+From the repository root:
+
+```bash
+npm run check                       # leaves dist/ matching src/; git status must be empty
+python3 "$HOME/.codex/skills/.system/plugin-creator/scripts/update_plugin_cachebuster.py" plugins/opencode-plugin-codex
+python3 "$HOME/.codex/skills/.system/plugin-creator/scripts/read_marketplace_name.py"
+codex plugin add opencode-plugin-codex@<marketplace-name>   # 0.1.0 used @opencode-plugin-codex
+```
+
+Then open a **new** Codex task — an existing task keeps the MCP server it started,
+so it will keep serving the old build — and confirm all five of:
+
+1. `opencode_check` returns `ok: true` and reports the installed OpenCode CLI. It must
+   discover the CLI without calling a model, so this costs no provider quota.
+2. It accepts the project root that current Codex supplies as per-call workspace
+   metadata, with the standard MCP roots list empty.
+3. The task lists 11 tools (as of 0.2.0), not 10.
+4. The published schemas are the current ones: `timeoutMs` refuses `1..9999`,
+   `maxToolCalls` is present on `opencode_run` with range `1..500`, and
+   `opencode_review` does **not** accept `autoApprovePermissions`.
+5. The built-in Skill served from the cache is this version's — it points at
+   `references/failure-routing.md` and names `opencode_sessions`.
+
+Record the date, the plugin version actually picked up, the OpenCode CLI version, and
+the tool count each time. A run that is not recorded here did not happen.
 
 - 2026-07-10: fresh Codex CLI task `019f4b94-5975-7b23-a2a3-9848c0826361` passed against installed cache `0.1.0+codex.20260710103034`, OpenCode CLI 1.17.15, 10 tools.
-- 0.2.0: not yet picked up from an installed cache. This release was verified from the repository only; run the pickup check before publishing, and record it here with its date and CLI version.
+- 0.2.0: **not yet run.** This release was verified from the repository only. Run the
+  steps above before publishing and add the result here.

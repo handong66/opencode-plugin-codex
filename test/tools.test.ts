@@ -82,6 +82,24 @@ async function withTempJob<T>(
   }
 }
 
+/**
+ * A detached background worker keeps writing into the state directory after the
+ * tool call returns, so a plain rm races it and fails with ENOTEMPTY. Retry until
+ * the worker is done rather than sleeping a fixed amount and hoping.
+ */
+async function removeWhenQuiet(dir: string): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      await rm(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOTEMPTY") throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  await rm(dir, { recursive: true, force: true });
+}
+
 async function createFakeOpenCode(cwd: string): Promise<string> {
   const bin = join(cwd, "fake-opencode.mjs");
   await writeFile(
@@ -641,8 +659,7 @@ describe("opencodeTransfer", () => {
       else process.env.OPENCODE_BIN = previousBin;
       if (previousState === undefined) delete process.env.OPENCODE_PLUGIN_STATE_DIR;
       else process.env.OPENCODE_PLUGIN_STATE_DIR = previousState;
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      await rm(binDir, { recursive: true, force: true });
+      await removeWhenQuiet(binDir);
     }
   });
 });

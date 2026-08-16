@@ -17,18 +17,7 @@ python3 "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" pl
 git diff --check
 ```
 
-Results:
-
-- Dependency audit: 0 vulnerabilities.
-- Unit suite: 8 files and 43 tests passed.
-- Cross-MCP background lifecycle and installed-cache workspace-root integration: 4 tests passed.
-- Repository validator and current official plugin-creator validator passed.
-- MCP smoke listed all 10 tools and verified the current schemas: no public `opencodeBin`, separate permission/private-path flags, and job lifecycle tools keyed only by `jobId`.
-- OpenCode CLI smoke passed `--version`, `--help`, and the `run`, `providers`, `models`, and `import` help probes.
-- Built-in, Dong-skills source, and installed collaboration Skills passed the current quick validator.
-- Both repositories passed `git diff --check`.
-
-## 0.2.0 — 2026-08-16 (OpenCode CLI 1.18.16, Node v25.9.0, macOS)
+### 0.2.0 — 2026-08-16 (OpenCode CLI 1.18.16, Node v25.9.0, macOS)
 
 - `npm test`: 31 files, 228 tests passed.
 - `npm run check`: build, typecheck, unit suite, repository plugin validation, and the
@@ -44,6 +33,17 @@ Results:
 - Live OpenCode CLI smokes (`npm run smoke:opencode-cli`, `npm run smoke:background`,
   `npm run smoke:live-transfer`) are not part of this record: they call the real CLI
   and provider, and this release was verified without spending provider quota.
+
+### 0.1.0 — 2026-07-10 (OpenCode CLI 1.17.15)
+
+- Dependency audit: 0 vulnerabilities.
+- Unit suite: 8 files and 43 tests passed.
+- Cross-MCP background lifecycle and installed-cache workspace-root integration: 4 tests passed.
+- Repository validator and current official plugin-creator validator passed.
+- MCP smoke listed all 10 tools and verified the current schemas: no public `opencodeBin`, separate permission/private-path flags, and job lifecycle tools keyed only by `jobId`.
+- OpenCode CLI smoke passed `--version`, `--help`, and the `run`, `providers`, `models`, and `import` help probes.
+- Built-in, Dong-skills source, and installed collaboration Skills passed the current quick validator.
+- Both repositories passed `git diff --check`.
 
 ## TDD evidence
 
@@ -72,4 +72,7 @@ Background jobs run in an independent worker with private central state. A new M
 
 ## Installed plugin pickup
 
-After a cachebuster update and `codex plugin add opencode-plugin-codex@opencode-plugin-codex`, verify from a new Codex task that the built-in Skill is current, all 10 tools are discoverable, the current schemas are present, and `opencode_check` accepts the project root supplied by current Codex per-call workspace metadata when standard MCP roots are empty. The check must discover OpenCode 1.17.15 without calling a model. Fresh Codex CLI task `019f4b94-5975-7b23-a2a3-9848c0826361` passed this pickup check against installed cache `0.1.0+codex.20260710103034` on 2026-07-10.
+After a cachebuster update and `codex plugin add opencode-plugin-codex@opencode-plugin-codex`, verify from a new Codex task that the built-in Skill is current, all tools are discoverable (11 as of 0.2.0), the current schemas are present, and `opencode_check` accepts the project root supplied by current Codex per-call workspace metadata when standard MCP roots are empty. The check must discover the installed OpenCode CLI without calling a model. Record the date, the plugin version picked up, and the CLI version each time.
+
+- 2026-07-10: fresh Codex CLI task `019f4b94-5975-7b23-a2a3-9848c0826361` passed against installed cache `0.1.0+codex.20260710103034`, OpenCode CLI 1.17.15, 10 tools.
+- 0.2.0: not yet picked up from an installed cache. This release was verified from the repository only; run the pickup check before publishing, and record it here with its date and CLI version.

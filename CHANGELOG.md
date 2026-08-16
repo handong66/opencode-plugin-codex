@@ -187,6 +187,14 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   instructions that load interactive skills or personas, and not to narrate. 89 of 231
   surviving job logs loaded a skill before starting the requested work.
 
+### Fixed
+
+- **CI-1** Foreground timeouts now spawn the OpenCode CLI in its own process group on
+  macOS and Linux, signal that whole group with `SIGTERM`, and escalate the group to
+  `SIGKILL` after the two-second grace period even if the CLI leader already exited.
+  Previously only the leader pid was signalled, so a provider or tool process spawned
+  by the CLI could survive `timeoutMs` and continue running after the call returned.
+
 ### Added
 
 - **X9** The rules a caller needs every round now live where the model already sees

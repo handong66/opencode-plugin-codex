@@ -90,6 +90,25 @@ async function isExecutable(candidate: string): Promise<boolean> {
   }
 }
 
+/**
+ * Signal a whole process group.
+ *
+ * A negative pid is the group whose leader has that pid, which is why every
+ * spawn on a timeout path asks for `detached` — the child's own pid becomes a
+ * group id, and one signal reaches the CLI and everything the CLI started.
+ * `pid <= 1` is refused because `kill(-0, ...)` signals the caller's own group and
+ * `kill(-1, ...)` signals every process the user owns. ESRCH means the group is
+ * already gone, which is the outcome this asks for.
+ */
+function signalProcessTree(pid: number | undefined, signal: NodeJS.Signals): void {
+  if (!pid || !Number.isSafeInteger(pid) || pid <= 1) return;
+  try {
+    process.kill(process.platform === "win32" ? pid : -pid, signal);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+  }
+}
+
 export async function runProcess(
   command: string,
   args: string[],
@@ -101,6 +120,10 @@ export async function runProcess(
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: sanitizeOpenCodeEnv({ ...process.env, ...(options.env ?? {}) }),
+      // The foreground timeout below has to reach OpenCode's own children.
+      // Without a group of its own, only the CLI pid receives the signal and
+      // every descendant can outlive the deadline.
+      detached: process.platform !== "win32",
       stdio: ["pipe", "pipe", "pipe"]
     });
 
@@ -114,10 +137,10 @@ export async function runProcess(
     const timeout = setTimeout(() => {
       if (settled) return;
       timedOut = true;
-      child.kill("SIGTERM");
-      setTimeout(() => {
-        if (!settled) child.kill("SIGKILL");
-      }, 2_000).unref();
+      signalProcessTree(child.pid, "SIGTERM");
+      // The leader exiting does not prove that descendants honoured SIGTERM,
+      // so escalation must target the group even after `close` settles this run.
+      setTimeout(() => signalProcessTree(child.pid, "SIGKILL"), 2_000).unref();
     }, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     timeout.unref();
 

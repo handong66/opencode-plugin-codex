@@ -1,4 +1,8 @@
-import { classifyOpenCodeFailure, detectOpenCodeJsonlError } from "./opencode-cli.js";
+import {
+  classifyOpenCodeFailure,
+  detectOpenCodeJsonlError,
+  openCodeFailureMessage
+} from "./opencode-cli.js";
 import { summarizeOpenCodeOutput, type JobRecord } from "./job-store.js";
 
 export type JobOutcome = {
@@ -81,7 +85,7 @@ export function finalizeJobRecord(params: FinalizeJobParams): JobRecord {
     return latest;
   }
 
-  latest.status = outcome.exitCode === 0 ? "succeeded" : "failed";
+  latest.status = outcome.exitCode === 0 && !outcome.signal ? "succeeded" : "failed";
   if (latest.status === "failed") {
     latest.errorClass = classifyOpenCodeFailure({
       command: latest.command,
@@ -92,6 +96,28 @@ export function finalizeJobRecord(params: FinalizeJobParams): JobRecord {
       stderr,
       durationMs: Date.now() - Date.parse(latest.startedAt ?? latest.createdAt)
     });
+    // Exactly one of the 398 recorded failures carried no errorMessage at all, and it
+    // was the one the keyword classifier had invented a class for. Every failure
+    // branch now says something a caller can act on.
+    latest.errorMessage = failureMessage(latest.errorClass, {
+      exitCode: outcome.exitCode,
+      signal: outcome.signal,
+      stderr
+    });
   }
   return latest;
+}
+
+/** The provider's own words when we have them, our sentence when we do not. */
+function failureMessage(
+  errorClass: string,
+  outcome: { exitCode: number | null; signal: NodeJS.Signals | null; stderr: string }
+): string {
+  const stderrTail = outcome.stderr.trim().split(/\r?\n/).filter(Boolean).slice(-3).join(" ").slice(0, 2_000);
+  const outcomeText =
+    outcome.signal !== null
+      ? `OpenCode was terminated by ${outcome.signal}.`
+      : `OpenCode exited with code ${outcome.exitCode}.`;
+  const guidance = openCodeFailureMessage(errorClass);
+  return stderrTail ? `${outcomeText} ${guidance} stderr: ${stderrTail}` : `${outcomeText} ${guidance}`;
 }

@@ -31,6 +31,8 @@ Only `outputSummary.resultComplete === true` is a finished OpenCode conclusion. 
 
 Background state lives in a private central user-state directory and survives MCP restarts. Keep the first returned `jobId`; status/result/cancel do not take `cwd`.
 
+`errorClass` is derived only from real error channels (timeout, terminating signal, structured JSONL error, stderr), never from OpenCode's own prose. `quota_exhausted`, `auth_required`, `model_unauthorized`, and `model_not_found` are not retryable: rerunning the same call reaches the same answer, so change provider, model, or account instead. `timeout`, `terminated`, `rate_limited`, `network_error`, `opencode_failed`, and `unknown` are retryable. An unrecognised provider message is reported as `unknown` with the full text rather than filed under a guessed class.
+
 `errorClass: "timeout"` is a spent budget, not a failed job: `opencode_status` returns `openCodeSessionId` and `resumable`, and a resumable session still holds the work. Records written before 0.2.0 have no `resumable` field; treat a missing value as false.
 
 Transfer accepts a rollout inside the workspace or Codex sessions directory, prefers current visible `event_msg` user/assistant text, verifies import by exporting the new session, and requires an explicit authorized model. If continuation fails after import, preserve the returned session ID and report `importSucceeded` separately. For background continuation, `continuationStarted` is not finality; require the job result or `continuationResultComplete === true`.

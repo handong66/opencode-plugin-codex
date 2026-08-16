@@ -172,6 +172,71 @@ describe("finalizeJobRecord on other outcomes", () => {
     expect(record.resumable).toBeUndefined();
   });
 
+  test("never leaves a failed job without an errorMessage", () => {
+    const withStderr = finalizeJobRecord({
+      record: baseRecord(),
+      stdout: stream("ses_failed", 2),
+      stderr: "opencode: something broke\n",
+      outcome: { exitCode: 1, signal: null },
+      timedOut: false,
+      cancelRequested: false
+    });
+    const withoutStderr = finalizeJobRecord({
+      record: baseRecord(),
+      stdout: stream("ses_silent", 2),
+      stderr: "",
+      outcome: { exitCode: 7, signal: null },
+      timedOut: false,
+      cancelRequested: false
+    });
+
+    expect(withStderr.errorMessage).toContain("exited with code 1");
+    expect(withStderr.errorMessage).toContain("something broke");
+    expect(withoutStderr.errorMessage).toContain("exited with code 7");
+    expect(withoutStderr.errorMessage).toBeTruthy();
+  });
+
+  test("reports an externally killed job as terminated, not as an authorization failure", () => {
+    // exitCode is null when something else SIGTERMs OpenCode; the old path handed the
+    // whole stdout transcript to a keyword classifier and invented a verdict from it.
+    const record = finalizeJobRecord({
+      record: baseRecord(),
+      stdout: [
+        stream("ses_killed", 2),
+        JSON.stringify({ type: "text", part: { type: "text", text: "the endpoint returns 403 Forbidden" } })
+      ].join("\n"),
+      stderr: "",
+      outcome: { exitCode: null, signal: "SIGTERM" },
+      timedOut: false,
+      cancelRequested: false
+    });
+
+    expect(record.status).toBe("failed");
+    expect(record.errorClass).toBe("terminated");
+    expect(record.errorMessage).toContain("SIGTERM");
+  });
+
+  test("reports a provider quota failure as its own non-retryable class", () => {
+    const record = finalizeJobRecord({
+      record: baseRecord(),
+      stdout: [
+        JSON.stringify({ type: "step_start", sessionID: "ses_quota" }),
+        JSON.stringify({
+          type: "error",
+          error: { name: "APIError", data: { message: "balance exhausted", statusCode: 402 } }
+        })
+      ].join("\n"),
+      stderr: "",
+      outcome: { exitCode: 1, signal: null },
+      timedOut: false,
+      cancelRequested: false
+    });
+
+    expect(record.errorClass).toBe("quota_exhausted");
+    expect(record.errorMessage).toBe("balance exhausted");
+    expect(record.opencodeSessionId).toBe("ses_quota");
+  });
+
   test("reports a spawn or stdin failure with its own class", () => {
     const spawnFailure = finalizeJobRecord({
       record: baseRecord(),

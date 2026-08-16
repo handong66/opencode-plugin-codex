@@ -5,7 +5,13 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { detectOpenCodeJsonlError, discoverOpenCode, sanitizeOpenCodeEnv } from "./opencode-cli.js";
+import {
+  detectOpenCodeJsonlError,
+  discoverOpenCode,
+  isRetryableOpenCodeFailure,
+  openCodeFailureMessage,
+  sanitizeOpenCodeEnv
+} from "./opencode-cli.js";
 import { DEFAULT_TIMEOUT_MS } from "./timeout-budget.js";
 
 export type JobKind =
@@ -226,9 +232,14 @@ export function summarizeOpenCodeOutput(record: JobRecord, stdout: string, stder
       : "OpenCode hit the wall-clock budget, not an error, but no OpenCode session id appeared in its output, " +
         "so there is no resume handle. Rerun with the default timeoutMs of 600000 before narrowing the target.";
   } else if (record.status === "failed" || structuredError) {
-    guidance = stderr.trim()
-      ? "OpenCode failed. Inspect stderr and rerun with a narrower prompt or corrected environment."
-      : "OpenCode failed without stderr. Rerun with a narrower prompt and inspect the OpenCode session directly if needed.";
+    const failureClass = structuredError?.errorClass ?? record.errorClass;
+    guidance = isRetryableOpenCodeFailure(failureClass)
+      ? stderr.trim()
+        ? "OpenCode failed. Inspect stderr and rerun with a narrower prompt or corrected environment."
+        : "OpenCode failed without stderr. Rerun with a narrower prompt and inspect the OpenCode session directly if needed."
+      : // Retrying a 402 or a 403 spends the user's time to reach the same answer;
+        // the class is the signal to route elsewhere, not to try again.
+        `${openCodeFailureMessage(failureClass ?? "unknown")} Do not retry this call unchanged.`;
   } else {
     guidance = "OpenCode exited successfully but no final assistant text was observed. Rerun with a narrower target and an explicit findings-only output contract.";
   }

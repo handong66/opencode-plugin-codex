@@ -37,6 +37,22 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   of a tail. The schema now accepts up to `1000000`, the store clamps to `1..100000`, and
   the response reports the effective `maxChars` and `maxCharsClamped`.
 
+- **OC-3** `errorClass` is no longer inferred from OpenCode's own prose. Classification
+  now reads only real error channels, in order: the wall-clock timeout, a terminating
+  signal, a structured JSONL `{"type":"error"}` event (branching on
+  `error.data.statusCode`), then stderr. stdout is model output — a review that discusses
+  a 403 used to be filed as `model_unauthorized`. Wording the table does not recognise
+  degrades to `unknown` plus the provider's full message instead of a wrong class, and
+  the provider message (for example `Did you mean: aihubmix?`) is passed through verbatim.
+- **OC-3** A bare `"timeout"` substring in an error stream is no longer `network_error`;
+  transport failures are matched by their own tokens (`ECONNREFUSED`, `ENOTFOUND`,
+  `ETIMEDOUT`, …).
+- **OC-3** Every failed job now carries an `errorMessage`. The generic non-zero-exit
+  branch previously set a class and no message.
+- **OC-3** `outputSummary.guidance` for a non-retryable failure (`quota_exhausted`,
+  `auth_required`, `model_unauthorized`, `model_not_found`) says what to do instead of
+  retrying, rather than "rerun with a narrower prompt".
+
 - **X1** `opencode_review` and `opencode_adversarial_review` prompts now open with a
   headless-delegation preamble telling OpenCode to ignore repository bootstrap
   instructions that load interactive skills or personas, and not to narrate. 89 of 231
@@ -44,6 +60,14 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 
 ### Added
 
+- **OC-3** New `errorClass` values: `quota_exhausted`, `model_not_found`, `auth_required`,
+  `rate_limited`, and `terminated`. The first four were previously reported as
+  `model_unauthorized` or `opencode_failed`; `terminated` covers a job ended by a signal,
+  which used to be run through the keyword classifier. Names shared with
+  grok-plugin-codex are reused verbatim so one orchestrator learns one table.
+- **OC-3** `isRetryableOpenCodeFailure(errorClass)` is exported for callers that route on
+  the class: `quota_exhausted`, `auth_required`, `model_unauthorized` and
+  `model_not_found` are not retryable; everything else is.
 - **OC-2** `JobRecord.opencodeSessionId` is recovered from the job's own output when the
   job ends, not only from the caller's arguments. All 113 recorded `run` timeouts had a
   usable session id in their stream and kept none of it.

@@ -81,6 +81,14 @@ An exit code is not enough. `resultComplete` requires all of:
 
 Text from an earlier tool-call step remains partial. JSONL `error` events override exit code 0 and feed error classification such as `model_unauthorized` or `network_error`. Output tails are capped; `outputTruncated` means earlier content was discarded.
 
+## Terminal records and budgets
+
+`src/job-finalize.ts` owns the terminal shape of a record. It runs once, when the stream is already complete in memory, and parses it a single time to recover `opencodeSessionId` and the event count; there is no incremental hot-path parser, because a half-written JSONL line cannot be parsed while streaming. Branch order is cancellation, timeout, spawn error, stdin error, structured JSONL error, then exit code.
+
+A `timeout` is a spent budget rather than a failed job. The record keeps the recovered session id, sets `resumable` when one exists, and its guidance routes to `opencode_continue` with a larger budget. `opencode_status` republishes `openCodeSessionId` and `resumable` so the cheapest poll carries the recovery handle. Records written before 0.2.0 have no `resumable` field and are read as false.
+
+`src/timeout-budget.ts` owns the budget policy: floor `10000`, ceiling `86400000`, default `600000`, foreground clamp `240000`, and the per-kind p90 table with its sample sizes and measurement window. Warnings from it are advisory and never refuse a call.
+
 ## Transfer
 
 Current Codex rollouts may contain injected user context in `response_item` records. The parser therefore prefers current visible events:

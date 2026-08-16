@@ -537,7 +537,15 @@ export async function opencodeTransfer(args: CommonArgs & {
 
 export async function opencodeStatus(args: { jobId: string }) {
   const store = new JobStore();
-  return jsonText({ ok: true, job: await store.status(args.jobId) });
+  const job = await store.status(args.jobId);
+  // The cheapest and most-called poll must carry the recovery handle; before this
+  // a caller had to fetch the full result to learn a timed-out job was resumable.
+  return jsonText({
+    ok: true,
+    job,
+    openCodeSessionId: job.opencodeSessionId,
+    resumable: job.resumable === true
+  });
 }
 
 export async function opencodeResult(args: { jobId: string; maxChars?: number }) {

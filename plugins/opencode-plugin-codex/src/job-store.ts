@@ -36,6 +36,12 @@ export type JobRecord = {
   signal?: NodeJS.Signals | null;
   errorClass?: string;
   errorMessage?: string;
+  /**
+   * True when the OpenCode session behind this record still holds the work and can
+   * be continued with opencode_continue. Records written before 0.2.0 omit it;
+   * treat a missing value as false.
+   */
+  resumable?: boolean;
   cancelRequestedAt?: string;
   outputTruncated?: boolean;
   stdoutPath: string;
@@ -209,6 +215,16 @@ export function summarizeOpenCodeOutput(record: JobRecord, stdout: string, stder
     guidance = "OpenCode is still running. Poll status/result later or cancel and rerun with a narrower target; do not treat current stdout as a final review.";
   } else if (record.status === "cancelled") {
     guidance = "OpenCode was cancelled. stdout/stderr are partial logs only; do not treat them as a final review or implementation result.";
+  } else if (record.errorClass === "timeout" && !structuredError) {
+    // A timeout is a budget failure, not an error: the OpenCode session still holds
+    // the work, so "rerun with a narrower prompt" throws away everything it did.
+    const sessionId = record.opencodeSessionId ?? openCodeSessionId;
+    guidance = sessionId
+      ? `OpenCode hit the wall-clock budget, not an error. Session ${sessionId} retains the work. ` +
+        `Resume with opencode_continue{sessionId:"${sessionId}", prompt:"Continue and produce only the final findings now."} and a larger timeoutMs. ` +
+        "Re-verify any file it cites — the tree may have changed since the pause."
+      : "OpenCode hit the wall-clock budget, not an error, but no OpenCode session id appeared in its output, " +
+        "so there is no resume handle. Rerun with the default timeoutMs of 600000 before narrowing the target.";
   } else if (record.status === "failed" || structuredError) {
     guidance = stderr.trim()
       ? "OpenCode failed. Inspect stderr and rerun with a narrower prompt or corrected environment."

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { chmod, readFile, rm, writeFile } from "node:fs/promises";
 import { spawn, type ChildProcess } from "node:child_process";
-import { classifyOpenCodeFailure, detectOpenCodeJsonlError, sanitizeOpenCodeEnv } from "./opencode-cli.js";
+import { sanitizeOpenCodeEnv } from "./opencode-cli.js";
+import { finalizeJobRecord } from "./job-finalize.js";
 import { JobStore, type JobRecord } from "./job-store.js";
 
 const MAX_CAPTURE_CHARS = 1_000_000;
@@ -163,47 +164,16 @@ async function main(): Promise<void> {
 
     if (flushTimer) clearTimeout(flushTimer);
     await flushLogs();
-    const latest = await store.read(jobId);
-    latest.exitCode = outcome.exitCode;
-    latest.signal = outcome.signal;
-    latest.outputTruncated = outputTruncated;
-    latest.finishedAt = new Date().toISOString();
-    if (latest.status === "cancelled" || latest.cancelRequestedAt || cancelRequested) {
-      latest.status = "cancelled";
-    } else if (timedOut) {
-      latest.status = "failed";
-      latest.errorClass = "timeout";
-      latest.errorMessage = `OpenCode exceeded timeoutMs=${latest.timeoutMs}.`;
-    } else if (outcome.error) {
-      latest.status = "failed";
-      latest.errorClass = "spawn_error";
-      latest.errorMessage = outcome.error.message;
-    } else if (stdinError) {
-      latest.status = "failed";
-      latest.errorClass = "stdin_error";
-      latest.errorMessage = `OpenCode did not accept the complete prompt on stdin: ${stdinError.message}`;
-    } else {
-      const structuredError = detectOpenCodeJsonlError(stdout, stderr);
-      if (structuredError) {
-        latest.status = "failed";
-        latest.errorClass = structuredError.errorClass;
-        latest.errorMessage = structuredError.message;
-        await store.write(latest);
-        return;
-      }
-      latest.status = outcome.exitCode === 0 ? "succeeded" : "failed";
-      if (latest.status === "failed") {
-        latest.errorClass = classifyOpenCodeFailure({
-          command: latest.command,
-          args: latest.args,
-          exitCode: outcome.exitCode,
-          signal: outcome.signal,
-          stdout,
-          stderr,
-          durationMs: Date.now() - Date.parse(latest.startedAt ?? latest.createdAt)
-        });
-      }
-    }
+    const latest = finalizeJobRecord({
+      record: await store.read(jobId),
+      stdout,
+      stderr,
+      outcome,
+      timedOut,
+      cancelRequested,
+      stdinError,
+      outputTruncated
+    });
     await store.write(latest);
   } catch (error) {
     await rm(store.inputPath(jobId), { force: true });

@@ -200,6 +200,46 @@ describe("JobStore background lifecycle", () => {
     await expect(readFile(store.inputPath(job.id), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  test("keeps the OpenCode session handle when a background job hits its budget", async () => {
+    const root = await tempDir();
+    const bin = join(root, "hanging-opencode.mjs");
+    await writeFile(
+      bin,
+      [
+        "#!/usr/bin/env node",
+        "if (process.argv[2] === '--version') { console.log('1.17.15'); process.exit(0); }",
+        "console.log(JSON.stringify({ type: 'step_start', sessionID: 'ses_budget_wall' }));",
+        "console.log(JSON.stringify({ type: 'tool_use', sessionID: 'ses_budget_wall', part: { type: 'tool', tool: 'read' } }));",
+        "setTimeout(() => {}, 60_000);"
+      ].join("\n")
+    );
+    await chmod(bin, 0o755);
+    const store = new JobStore(root);
+
+    // The caller never passes sessionId on a fresh run, so before OC-2 the 113
+    // recorded run timeouts kept no handle at all.
+    const job = await store.startOpenCodeJob({
+      kind: "run",
+      cwd: process.cwd(),
+      args: ["run", "--format", "json", "--dir", process.cwd()],
+      prompt: "budget wall probe",
+      timeoutMs: 300,
+      opencodeBin: bin
+    });
+    const terminal = await waitForTerminal(store, job.id, 5_000);
+
+    expect(terminal.status).toBe("failed");
+    expect(terminal.errorClass).toBe("timeout");
+    expect(terminal.opencodeSessionId).toBe("ses_budget_wall");
+    expect(terminal.resumable).toBe(true);
+    expect(terminal.errorMessage).toContain("ses_budget_wall");
+    expect(terminal.errorMessage).toContain("timeoutMs=300");
+
+    const { outputSummary } = await store.result(job.id);
+    expect(outputSummary.guidance).toContain("opencode_continue");
+    expect(outputSummary.openCodeSessionId).toBe("ses_budget_wall");
+  });
+
   test("records a background spawn error when the discovered binary disappears", async () => {
     const root = await tempDir();
     const bin = join(root, "vanishing-opencode.mjs");

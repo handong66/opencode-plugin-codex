@@ -17,8 +17,19 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   passing an unusable value to a call Codex aborts at 300s. The clamp is reported, never
   refused.
 
+- **OC-2** A timed-out job is no longer reported as a generic failure. `errorMessage`
+  now states the budget, how many events OpenCode produced, and whether the session
+  survives; `outputSummary.guidance` routes to `opencode_continue` with a larger budget
+  instead of "rerun with a narrower prompt", which discarded the work.
+
 ### Added
 
+- **OC-2** `JobRecord.opencodeSessionId` is recovered from the job's own output when the
+  job ends, not only from the caller's arguments. All 113 recorded `run` timeouts had a
+  usable session id in their stream and kept none of it.
+- **OC-2** `JobRecord.resumable` (and `opencode_status`'s top-level `resumable` and
+  `openCodeSessionId`) tell a caller whether the work can be continued. Records written
+  before 0.2.0 omit `resumable`; a missing value means false.
 - **OC-1** Execution tools return a top-level `warnings: string[]`. Two advisory warnings
   exist so far: a foreground clamp, and a budget below the recorded p90 wall time for that
   job kind (`continue` 179000, `rescue` 283000, `run` 306000, `review` 347000,

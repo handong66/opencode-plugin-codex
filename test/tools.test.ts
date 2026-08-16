@@ -8,6 +8,7 @@ import {
   opencodeContinue,
   opencodeResult,
   opencodeRun,
+  opencodeStatus,
   opencodeTransfer
 } from "../plugins/opencode-plugin-codex/src/tools.js";
 
@@ -635,6 +636,60 @@ describe("opencodeResult", () => {
     expect(result.outputSummary?.state).toBe("succeeded_without_text");
   });
 
+  test("routes a timed-out job to session resumption instead of a narrower rerun", async () => {
+    const jobId = "job_timeout_resumable";
+    const stdout = [
+      JSON.stringify({ type: "step_start", sessionID: "ses_wall" }),
+      JSON.stringify({ type: "tool_use", sessionID: "ses_wall", part: { type: "tool", tool: "read" } })
+    ].join("\n");
+
+    const result = parseToolResult(
+      await withTempJob(
+        {
+          id: jobId,
+          status: "failed",
+          errorClass: "timeout",
+          errorMessage: "OpenCode exceeded timeoutMs=120000 after producing 2 events. The OpenCode session ses_wall is still resumable.",
+          opencodeSessionId: "ses_wall",
+          resumable: true
+        },
+        stdout,
+        "",
+        () => opencodeResult({ jobId })
+      )
+    );
+
+    const guidance = result.outputSummary?.guidance ?? "";
+    expect(result.outputSummary?.state).toBe("failed_partial");
+    expect(guidance).toContain("ses_wall");
+    expect(guidance).toContain("opencode_continue");
+    expect(guidance).toMatch(/larger timeoutMs/i);
+    expect(guidance).toMatch(/re-verify/i);
+    expect(guidance).not.toMatch(/narrower prompt/i);
+  });
+
+  test("does not offer a resume handle for a timeout that produced no session id", async () => {
+    const jobId = "job_timeout_no_handle";
+    const result = parseToolResult(
+      await withTempJob(
+        {
+          id: jobId,
+          status: "failed",
+          errorClass: "timeout",
+          errorMessage: "OpenCode exceeded timeoutMs=120000 after producing 0 events. No OpenCode session id was observed.",
+          resumable: false
+        },
+        "",
+        "",
+        () => opencodeResult({ jobId })
+      )
+    );
+
+    const guidance = result.outputSummary?.guidance ?? "";
+    expect(guidance).toMatch(/no OpenCode session id/i);
+    expect(guidance).not.toContain("opencode_continue{sessionId");
+  });
+
   test("classifies an OpenCode JSONL error event even when the CLI exits zero", async () => {
     const jobId = "job_error_event";
     const stdout = JSON.stringify({
@@ -652,5 +707,40 @@ describe("opencodeResult", () => {
     expect(result.outputSummary?.resultComplete).toBe(false);
     expect(result.outputSummary?.state).toBe("failed_partial");
     expect(result.outputSummary?.errorClass).toBe("model_unauthorized");
+  });
+});
+
+describe("opencodeStatus", () => {
+  test("exposes the recovery handle on the cheapest poll", async () => {
+    const jobId = "job_status_handle";
+    const result = parseToolResult(
+      await withTempJob(
+        {
+          id: jobId,
+          status: "failed",
+          errorClass: "timeout",
+          opencodeSessionId: "ses_status_handle",
+          resumable: true
+        },
+        "",
+        "",
+        () => opencodeStatus({ jobId })
+      )
+    );
+
+    expect(result.openCodeSessionId).toBe("ses_status_handle");
+    expect(result.resumable).toBe(true);
+  });
+
+  test("treats a pre-0.2.0 record without the field as not resumable", async () => {
+    const jobId = "job_status_legacy";
+    const result = parseToolResult(
+      await withTempJob({ id: jobId, status: "failed", errorClass: "opencode_failed" }, "", "", () =>
+        opencodeStatus({ jobId })
+      )
+    );
+
+    expect(result.resumable).toBe(false);
+    expect(result.openCodeSessionId).toBeUndefined();
   });
 });

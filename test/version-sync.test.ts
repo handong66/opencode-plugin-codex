@@ -94,3 +94,16 @@ describe("release version gate", () => {
     expect(errors[0]).toContain("advertises release 0.1.0");
   });
 });
+
+describe("changelog release heading", () => {
+  test("the top section names the shipped version and the day it was frozen", () => {
+    // 0.1.0 was published while its section still read "Unreleased", so nothing in
+    // the repository recorded which day that contract was frozen — and a reader
+    // could not tell a shipped section from one still being written.
+    const changelog = readFileSync(join(repoRoot, "CHANGELOG.md"), "utf8");
+    const firstHeading = (/^##\s+.*$/m.exec(changelog)?.[0] ?? "").trim();
+
+    expect(firstHeading).toMatch(/^##\s+\d+\.\d+\.\d+\s+—\s+\d{4}-\d{2}-\d{2}$/);
+    expect(firstHeading).toContain(packageJson.version);
+  });
+});

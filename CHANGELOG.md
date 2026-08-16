@@ -3,7 +3,7 @@
 Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to the
 2026-08-16 Grok/OpenCode plugin collaboration audit.
 
-## Unreleased — 0.2.0
+## 0.2.0 — 2026-08-16
 
 ### Contract
 
@@ -322,6 +322,15 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   cached; `force: true` re-reads them after a CLI install or a configuration change,
   and the response reports `cache.providersCachedAt` / `cache.providersCacheHit`. The
   tool description now says the result is stable for the session.
+- **OX6** Only *successful* answers are cached — the rule `discoverOpenCode` already
+  followed. A `providers list` that exits non-zero and a `debug config` probe that
+  could not read the configuration are re-run on the next call. Caching them turned
+  one transient failure into a permanent one for the life of the MCP server process:
+  every later `opencode_check` returned `provider_listing_failed` with
+  `retryable: true`, so the caller's retry landed back in the same memo, and every
+  later `opencode_transfer` without an explicit model refused with
+  `opencode_model_required`. `force: true` is still an extra invalidation, not the
+  only recovery.
 - **OX6** Provider and model listings are returned as parsed arrays (`providers`,
   `providerIds`, `models`) with ANSI escapes stripped, and `providersRaw`/`modelsRaw`
   are stripped too — every one of those 471 responses used to push terminal control
@@ -370,9 +379,11 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   "authorization verified" field: a configured or listed model is still not proof of
   authorization. The effective configuration comes from `opencode debug config`, of
   which only the root/build/plan models and variants are parsed; the raw config is
-  never returned. The probe is memoised per binary and directory, and on the submit
-  path it runs only when an explicit model was passed, so the common case spawns
-  nothing extra. `opencode_check` reports it as `effectiveModel`.
+  never returned. Successful probes are memoised per binary and directory, and on the
+  submit path a probe runs only when an explicit model was passed, so the common case
+  (943 of 1,051 recorded jobs) spawns nothing extra. `opencode_check` reports the
+  answer as `effectiveModel`, and `opencode_transfer` probes whether or not a model
+  was requested, because its imported session file has to name one.
 - **OC-6** `waitMs` on `opencode_status` and `opencode_result`. The server now blocks
   until the record is terminal (backing off 500ms → 5s, re-reading the record each
   round so an `opencode_cancel` from elsewhere ends the wait) and reports `waited`.

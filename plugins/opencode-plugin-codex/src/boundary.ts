@@ -19,7 +19,9 @@ export type BoundaryErrorCode =
   | "rollout_invalid"
   | "state_write_failed"
   | "cli_not_found"
-  | "cli_probe_timeout";
+  | "cli_probe_timeout"
+  /** Shares the OC-3 errorClass name so one orchestrator learns one table. */
+  | "model_not_found";
 
 /**
  * Retrying the same call unchanged: only a probe timeout can plausibly succeed
@@ -33,7 +35,8 @@ const BOUNDARY_RETRYABLE: Record<BoundaryErrorCode, boolean> = {
   rollout_invalid: false,
   state_write_failed: false,
   cli_not_found: false,
-  cli_probe_timeout: true
+  cli_probe_timeout: true,
+  model_not_found: false
 };
 
 export class BoundaryError extends Error {
@@ -74,6 +77,29 @@ export function workspaceOutOfBounds(candidate: string, roots: string[]): Bounda
 
 export function workspaceUnavailable(message: string, details?: Record<string, unknown>): BoundaryError {
   return new BoundaryError("workspace_unavailable", message, details);
+}
+
+/**
+ * Fail a provider id that differs from the enumerated one only by case.
+ *
+ * `AIHubMix/deep-deepseek-v4-pro` ran five jobs and succeeded zero times, while
+ * `aihubmix/...` ran 62 and succeeded 50. The spelling is never rewritten silently
+ * — that was rejected — but spending a whole job to be told
+ * `Did you mean: aihubmix?` is worse than saying it here.
+ */
+export function providerIdCaseMismatch(params: {
+  requested: string;
+  provider: string;
+  knownProvider: string;
+  knownProviders: string[];
+}): BoundaryError {
+  return new BoundaryError(
+    "model_not_found",
+    `OpenCode has no provider "${params.provider}", but it does have "${params.knownProvider}" — provider ids are ` +
+      `case-sensitive. Resubmit with model "${params.requested.replace(params.provider, params.knownProvider)}". ` +
+      "The plugin does not rewrite the id for you.",
+    { requested: params.requested, provider: params.provider, knownProviders: params.knownProviders }
+  );
 }
 
 /**

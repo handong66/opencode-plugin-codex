@@ -166,6 +166,13 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   `providerIds`, `models`) with ANSI escapes stripped, and `providersRaw`/`modelsRaw`
   are stripped too — every one of those 471 responses used to push terminal control
   bytes into the caller's context as content.
+- **OX10(a)** An explicit `model` whose provider id differs only in case from one
+  `opencode_check` already enumerated in this process is refused before the job
+  starts, with `error.code: "model_not_found"`, the correct spelling, and
+  `details.knownProviders`. `AIHubMix/deep-deepseek-v4-pro` ran five jobs and
+  succeeded zero times while `aihubmix/…` ran 62 and succeeded 50. Nothing is
+  rewritten silently — that was rejected — and a provider that is simply absent from
+  the listing is not refused, since it may have been configured since.
 - **OX6 / OX10(a)** A failing provider or model listing is no longer wrapped in
   `ok: true`. `Provider not found: AIHubMix` arrived five times inside a successful
   envelope, and the caller went on to submit `AIHubMix/…` jobs (five jobs, zero

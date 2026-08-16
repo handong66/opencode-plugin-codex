@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { stripAnsi } from "../plugins/opencode-plugin-codex/src/ansi.js";
 import { parseListOutput, resetCheckCache } from "../plugins/opencode-plugin-codex/src/check-cache.js";
-import { opencodeCheck } from "../plugins/opencode-plugin-codex/src/tools.js";
+import { opencodeCheck, opencodeRun } from "../plugins/opencode-plugin-codex/src/tools.js";
 import { resetOpenCodeDiscoveryCache } from "../plugins/opencode-plugin-codex/src/opencode-cli.js";
 import { resetEffectiveModelCache } from "../plugins/opencode-plugin-codex/src/model-guard.js";
-import { readEnvelope } from "./helpers/envelope.js";
+import { readEnvelope, refusalOf } from "./helpers/envelope.js";
 
 const ESC = String.fromCharCode(27);
 
@@ -121,6 +121,66 @@ describe("opencode_check caching", () => {
       expect(result.providerIds).toContain("deepseek");
       expect(JSON.stringify(result)).not.toContain(ESC);
       expect(result.providersRaw).not.toContain(ESC);
+    });
+  });
+});
+
+describe("provider id spelling", () => {
+  test("fails fast on a case mismatch against the enumerated providers", async () => {
+    await withCountingCli(async () => {
+      // The list has to have been enumerated first; nothing is spawned for this check.
+      await opencodeCheck({ cwd: process.cwd() });
+
+      const error = await refusalOf(() =>
+        opencodeRun({
+          cwd: process.cwd(),
+          background: false,
+          prompt: "case mismatch probe",
+          model: "AIHubMix/deep-deepseek-v4-pro"
+        })
+      );
+
+      // AIHubMix/... ran five jobs and succeeded zero times; aihubmix/... ran 62 and
+      // succeeded 50. The id is never rewritten silently — that was rejected.
+      expect(error.code).toBe("model_not_found");
+      expect(error.retryable).toBe(false);
+      expect(error.message).toContain('"aihubmix"');
+      expect(error.message).toContain("aihubmix/deep-deepseek-v4-pro");
+      expect((error.details as { knownProviders: string[] }).knownProviders).toContain("aihubmix");
+    });
+  });
+
+  test("says nothing about a provider that simply is not in the listing", async () => {
+    await withCountingCli(async () => {
+      await opencodeCheck({ cwd: process.cwd() });
+
+      const response = readEnvelope<{ ok: boolean }>(
+        await opencodeRun({
+          cwd: process.cwd(),
+          background: false,
+          prompt: "unknown provider probe",
+          model: "brandnew/model-1"
+        })
+      );
+
+      // A provider configured since the last listing is not the plugin's business to
+      // refuse; only the proven case-mismatch failure is.
+      expect(response.ok).toBe(true);
+    });
+  });
+
+  test("stays silent when no listing has been taken in this process", async () => {
+    await withCountingCli(async () => {
+      const response = readEnvelope<{ ok: boolean }>(
+        await opencodeRun({
+          cwd: process.cwd(),
+          background: false,
+          prompt: "no listing probe",
+          model: "AIHubMix/deep-deepseek-v4-pro"
+        })
+      );
+
+      expect(response.ok).toBe(true);
     });
   });
 });

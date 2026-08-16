@@ -20,7 +20,7 @@ const FAKE_OPENCODE = [
   "import { appendFileSync } from 'node:fs';",
   "const argv = process.argv.slice(2);",
   "if (argv[0] === '--version') { console.log('1.18.16'); process.exit(0); }",
-  "appendFileSync(process.env.FAKE_INVOCATIONS, JSON.stringify(argv) + '\\n');",
+  "appendFileSync(process.env.FAKE_INVOCATIONS, JSON.stringify({ argv, pid: process.pid }) + '\\n');",
   "process.stdin.resume();",
   "const sessionIndex = argv.indexOf('--session');",
   "if (sessionIndex === -1) {",
@@ -115,11 +115,17 @@ describe("maxToolCalls", () => {
     const passes = (await readFile(invocations, "utf8"))
       .split("\n")
       .filter(Boolean)
-      .map((line) => JSON.parse(line) as string[])
-      .filter((args) => args[0] !== "--version");
+      .map((line) => JSON.parse(line) as { argv: string[]; pid: number })
+      .filter((pass) => pass.argv[0] !== "--version");
     expect(passes).toHaveLength(2);
-    expect(passes[0]).not.toContain("--session");
-    expect(passes[1]).toContain("--session");
-    expect(passes[1]).toContain("ses_budget");
+    expect(passes[0].argv).not.toContain("--session");
+    expect(passes[1].argv).toContain("--session");
+    expect(passes[1].argv).toContain("ses_budget");
+
+    // The record must name the process that actually ran the answer pass. The first
+    // child was SIGTERMed before it started, so a record still pointing at it leaves
+    // a detached OpenCode session nothing outside the worker can signal.
+    expect(result.record.pid).toBe(passes[1].pid);
+    expect(result.record.pid).not.toBe(passes[0].pid);
   }, 30_000);
 });

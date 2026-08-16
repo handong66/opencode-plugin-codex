@@ -247,6 +247,7 @@ async function main(): Promise<void> {
     if (toolBudgetReached && streamSessionId && !cancelRequested && !timedOut) {
       const elapsedMs = Date.now() - Date.parse(record.startedAt ?? record.createdAt);
       const remainingMs = record.timeoutMs - elapsedMs;
+      let recordedAnswerPid = Promise.resolve();
       const finalAnswer = await runFinalAnswerPass({
         record,
         sessionId: streamSessionId,
@@ -265,9 +266,29 @@ async function main(): Promise<void> {
         },
         register: (nextChild) => {
           child = nextChild;
+          // Point the record at the process that is actually running. `record.pid`
+          // still named the first child, which this worker already SIGTERMed, so a
+          // signal sent to it is swallowed as ESRCH. That is survivable while this
+          // worker lives (JobStore.cancel also signals `workerPid`, and the SIGTERM
+          // handler forwards to whichever child is current) but not when the worker
+          // itself dies during the answer pass: the second child is detached in its
+          // own process group, and with its pid recorded nowhere nothing outside
+          // this process could ever reach it. opencode_status also stops reporting
+          // a dead pid for a job that is still running.
+          recordedAnswerPid = (async () => {
+            const stored = await store.read(jobId).catch(() => undefined);
+            // A terminal record means a cancel already landed; the handler above and
+            // JobStore.cancel's workerPid signal cover the child, and writing here
+            // would put "running" back over it.
+            if (!stored || ["succeeded", "failed", "cancelled"].includes(stored.status)) return;
+            stored.pid = nextChild.pid;
+            await store.write(stored).catch(() => undefined);
+          })();
+          void recordedAnswerPid.catch(() => undefined);
           if (cancelRequested) signalTree(child, "SIGTERM");
         }
       });
+      await recordedAnswerPid;
       // The interrupted first pass is not the job's outcome; the answer pass is.
       outcome = finalAnswer;
       stdinError = undefined;

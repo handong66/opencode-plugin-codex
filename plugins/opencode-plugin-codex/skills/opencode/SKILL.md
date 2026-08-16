@@ -27,6 +27,8 @@ A job with `outputSummary.permissionDenied === true` inspected less than it was 
 
 ## Result and safety gates
 
+`outputSummary.finalText` is OpenCode's answer; the stdout tail is evidence, not the answer. It is present only when `resultComplete === true`, is bounded at 32000 characters, and reports `finalTextTruncated` when that bound was hit. `opencode_result` accepts `view: "raw" | "final"`; `raw` remains the default and `final` drops the stdout/stderr tails (`rawOmitted: true`) for callers that only need the answer.
+
 Only `outputSummary.resultComplete === true` is a finished OpenCode conclusion. Running, queued, cancelled, failed, JSONL-error, truncated, or succeeded-without-final-text output is partial evidence. Codex must verify every finding against real files and commands.
 
 `opencode_result`'s `maxChars` has an effective range of `1..100000` (default `20000`); a larger request is clamped and reported as `maxChars` plus `maxCharsClamped: true` rather than refused. Widening the window is not how to reach a conclusion — read `outputSummary`.

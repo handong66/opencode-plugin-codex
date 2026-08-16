@@ -67,6 +67,14 @@ export type JobOutputSummary = {
   openCodeSessionId?: string;
   lastEventType?: string;
   lastTextPreview?: string;
+  /**
+   * OpenCode's own final answer, present only when `resultComplete` is true. Field
+   * name and semantics match grok-plugin-codex's `outputSummary.finalText` so one
+   * orchestrator learns one contract. Bounded at 32,000 characters (the largest
+   * recorded answer was 24,811).
+   */
+  finalText?: string;
+  finalTextTruncated: boolean;
   sawToolUse: boolean;
   sawSubagentTask: boolean;
   /**
@@ -82,6 +90,12 @@ export type JobOutputSummary = {
   guidance: string;
 };
 
+/**
+ * 'raw' is today's shape (record + stdout/stderr tails + summary). 'final' drops the
+ * tails and keeps `outputSummary.finalText`, which is where the answer actually is.
+ */
+export type JobResultView = "raw" | "final";
+
 export type JobStoreOptions = {
   stateDir?: string;
   workerPath?: string;
@@ -93,6 +107,9 @@ const MAX_RESULT_CHARS = 100_000;
 const SUMMARY_READ_CHARS = 1_000_000;
 
 const MAX_DENIED_PATHS = 5;
+
+/** Budget for the returned final answer. Recorded answers: median 4,226, max 24,811. */
+const MAX_FINAL_TEXT_CHARS = 32_000;
 
 /** The literal line OpenCode writes to stderr when it auto-rejects a permission. */
 const AUTO_REJECT_PATTERN = /permission requested: (\w+) \(([^)]*)\); auto-rejecting/g;
@@ -174,7 +191,8 @@ export function summarizeOpenCodeOutput(record: JobRecord, stdout: string, stder
   let openCodeSessionId: string | undefined;
   let lastEventType: string | undefined;
   let lastObservedText = "";
-  let currentStepText = "";
+  /** Every text part of the current step. The old code kept only the last one. */
+  let currentStepChunks: string[] = [];
   let finalText = "";
   let sawTerminalStop = false;
   let sawToolUse = false;
@@ -210,7 +228,7 @@ export function summarizeOpenCodeOutput(record: JobRecord, stdout: string, stder
     lastEventType = eventType;
 
     if (eventType === "step_start") {
-      currentStepText = "";
+      currentStepChunks = [];
       finalText = "";
       sawTerminalStop = false;
     }
@@ -229,15 +247,15 @@ export function summarizeOpenCodeOutput(record: JobRecord, stdout: string, stder
     }
     if (eventType === "text" && typeof typedEvent.part?.text === "string" && typedEvent.part.text.trim()) {
       lastObservedText = typedEvent.part.text;
-      currentStepText = typedEvent.part.text;
+      currentStepChunks.push(typedEvent.part.text);
     }
     if (eventType === "step_finish") {
       const reason = typedEvent.part?.reason ?? typedEvent.reason;
       if (reason === "stop") {
         sawTerminalStop = true;
-        finalText = currentStepText;
+        finalText = currentStepChunks.join("");
       }
-      currentStepText = "";
+      currentStepChunks = [];
     }
   }
 
@@ -309,6 +327,10 @@ export function summarizeOpenCodeOutput(record: JobRecord, stdout: string, stder
     lastTextPreview: (resultComplete ? finalText : lastObservedText)
       ? previewText(resultComplete ? finalText : lastObservedText)
       : undefined,
+    // The answer itself, not a preview of it. Before this the only structured way to
+    // read a 4,000-character review was to re-implement this parser on the caller side.
+    finalText: resultComplete ? finalText.slice(0, MAX_FINAL_TEXT_CHARS) : undefined,
+    finalTextTruncated: resultComplete && finalText.length > MAX_FINAL_TEXT_CHARS,
     sawToolUse,
     sawSubagentTask,
     permissionDenied: deniedPaths.length > 0,
@@ -526,11 +548,14 @@ export class JobStore {
 
   async result(
     jobId: string,
-    maxChars = 20_000
+    maxChars = 20_000,
+    view: JobResultView = "raw"
   ): Promise<{
     record: JobRecord;
-    stdout: string;
-    stderr: string;
+    view: JobResultView;
+    rawOmitted?: true;
+    stdout?: string;
+    stderr?: string;
     maxChars: number;
     maxCharsClamped: boolean;
     outputSummary: JobOutputSummary;
@@ -543,16 +568,20 @@ export class JobStore {
       readTail(this.stdoutPath(jobId), SUMMARY_READ_CHARS),
       readTail(this.stderrPath(jobId), SUMMARY_READ_CHARS)
     ]);
+    const outputSummary = summarizeOpenCodeOutput(record, summaryStdout, summaryStderr);
     return {
       record,
-      stdout,
-      stderr,
+      view,
+      // 'final' is opt-in: the installed collaboration Skill still tells callers to
+      // read stderr/JSONL evidence, so the default view cannot change until that
+      // document ships the same version.
+      ...(view === "final" ? { rawOmitted: true as const } : { stdout, stderr }),
       // The schema used to reject anything above MAX_RESULT_CHARS while the store
       // silently clamped, so a caller widening its window got a protocol error
       // instead of the tail it asked for. Clamp, then say what was used.
       maxChars: boundedMaxChars,
       maxCharsClamped: boundedMaxChars !== maxChars,
-      outputSummary: summarizeOpenCodeOutput(record, summaryStdout, summaryStderr)
+      outputSummary
     };
   }
 }

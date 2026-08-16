@@ -10,7 +10,12 @@ import {
 } from "./opencode-cli.js";
 import { findCodexRolloutFile, readCodexTranscriptFromRollout } from "./codex-rollout.js";
 import { toOpenCodeSession } from "./opencode-session.js";
-import { JobStore, summarizeOpenCodeOutput, type JobRecord } from "./job-store.js";
+import {
+  JobStore,
+  summarizeOpenCodeOutput,
+  type JobRecord,
+  type JobResultView
+} from "./job-store.js";
 import { resolveTimeoutBudget } from "./timeout-budget.js";
 
 export type CommonArgs = {
@@ -562,9 +567,9 @@ export async function opencodeStatus(args: { jobId: string }) {
   });
 }
 
-export async function opencodeResult(args: { jobId: string; maxChars?: number }) {
+export async function opencodeResult(args: { jobId: string; maxChars?: number; view?: JobResultView }) {
   const store = new JobStore();
-  return jsonText({ ok: true, ...(await store.result(args.jobId, args.maxChars)) });
+  return jsonText({ ok: true, ...(await store.result(args.jobId, args.maxChars, args.view)) });
 }
 
 export async function opencodeCancel(args: { jobId: string }) {

@@ -225,9 +225,19 @@ server.registerTool(
   "opencode_result",
   {
     title: "OpenCode Job Result",
-    description: "Read stdout/stderr tail and outputSummary for a background OpenCode job. Only outputSummary.resultComplete means OpenCode produced final text.",
+    description:
+      "Read stdout/stderr tail and outputSummary for a background OpenCode job. " +
+      "outputSummary.finalText is OpenCode's answer; the stdout tail is evidence, not the answer. " +
+      "Only outputSummary.resultComplete means OpenCode produced final text.",
     inputSchema: {
       jobId: jobIdSchema,
+      view: z
+        .enum(["raw", "final"])
+        .optional()
+        .describe(
+          "'raw' (default) returns the stdout/stderr tails plus outputSummary, exactly as before. " +
+            "'final' drops the tails and returns outputSummary only, whose finalText carries the whole answer."
+        ),
       maxChars: z
         .number()
         .int()

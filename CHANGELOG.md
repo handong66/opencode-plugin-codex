@@ -49,6 +49,9 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   `ETIMEDOUT`, …).
 - **OC-3** Every failed job now carries an `errorMessage`. The generic non-zero-exit
   branch previously set a class and no message.
+- **OC-5** A step's text parts are joined instead of overwritten, so a final answer split
+  across several `text` parts is no longer reduced to its last fragment. Hardening: no
+  recorded log did this.
 - **OC-4** `outputSummary.guidance` for a permission-denied job replaces "rerun with a
   narrower target" (which shrank the scope of a job that had inspected nothing) with the
   denied paths, a statement that absence of findings is not evidence of correctness, and
@@ -65,6 +68,16 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 
 ### Added
 
+- **OC-5** `outputSummary.finalText` and `outputSummary.finalTextTruncated`. The final
+  answer was already parsed out of the stream and thrown away after producing a 500-char
+  preview; recorded answers are median 4,226 / p90 8,784 / max 24,811 characters, so the
+  preview showed 2–12% of one and every caller re-implemented the `step_finish` parser.
+  Field name and semantics match grok-plugin-codex's `outputSummary.finalText`. Bounded
+  at 32000 characters.
+- **OC-5** `opencode_result` accepts `view: "raw" | "final"`. `raw` stays the default —
+  the installed `codex-opencode-collaboration` Skill still tells callers to read
+  stderr/JSONL evidence, so the default cannot flip before that document ships the same
+  version. `final` drops the stdout/stderr tails and sets `rawOmitted: true`.
 - **OC-4** `outputSummary.permissionDenied` and `outputSummary.deniedPaths` (capped at 5)
   report permissions OpenCode asked for and did not get, read from the
   `permission requested: <tool> (<path>); auto-rejecting` stderr lines and from rejected

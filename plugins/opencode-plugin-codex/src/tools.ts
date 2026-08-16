@@ -195,6 +195,17 @@ function validatePromptBoundary(prompt: string, allowCodexPrivatePaths?: boolean
  * spent before the review starts.
  */
 /**
+ * Foreground bounds, matched to the background path.
+ *
+ * The foreground call captured up to 1,000,000 characters per stream and returned all
+ * of it, while a background job captured 100,000 and returned 20,000 by default — the
+ * synchronous path was 10 to 50 times wider than the asynchronous one for no reason.
+ * Measured payloads: 1,061 responses over 50,000 characters, largest 1,341,598.
+ */
+const FOREGROUND_MAX_OUTPUT_CHARS = 100_000;
+const FOREGROUND_TAIL_CHARS = 20_000;
+
+/**
  * A hard file budget for bounded reviews. Timed-out jobs made a median of 13 tool
  * calls and up to 81, mostly reads, while successful ones made 5: an unbounded
  * review walks the tree until the wall-clock budget ends it.
@@ -261,7 +272,8 @@ async function runOrStartJob(params: {
     cwd,
     opencodeBin: params.trustedOpenCodeBin,
     timeoutMs: budget.timeoutMs,
-    input: params.prompt
+    input: params.prompt,
+    maxOutputChars: FOREGROUND_MAX_OUTPUT_CHARS
   });
   const structuredError = detectOpenCodeJsonlError(result.stdout, result.stderr);
   const processSucceeded = result.exitCode === 0 && !structuredError;
@@ -283,14 +295,18 @@ async function runOrStartJob(params: {
     stdoutPath: "",
     stderrPath: ""
   };
+  // The complete buffers still feed the classifier and the summary; only what
+  // crosses the wire is bounded.
+  const stdoutTail = result.stdout.slice(-FOREGROUND_TAIL_CHARS);
+  const stderrTail = result.stderr.slice(-FOREGROUND_TAIL_CHARS);
   return jsonText({
     ok: processSucceeded,
     bin: result.bin,
     exitCode: result.exitCode,
-    stdout: result.stdout,
-    stderr: result.stderr,
-    stdoutTruncated: result.stdoutTruncated,
-    stderrTruncated: result.stderrTruncated,
+    stdout: stdoutTail,
+    stderr: stderrTail,
+    stdoutTruncated: result.stdoutTruncated === true || stdoutTail.length < result.stdout.length,
+    stderrTruncated: result.stderrTruncated === true || stderrTail.length < result.stderr.length,
     errorClass: summaryRecord.errorClass,
     outputSummary: summarizeOpenCodeOutput(summaryRecord, result.stdout, result.stderr),
     warnings

@@ -37,6 +37,8 @@ A job with `outputSummary.permissionDenied === true` inspected less than it was 
 
 Only `outputSummary.resultComplete === true` is a finished OpenCode conclusion. Running, queued, cancelled, failed, JSONL-error, truncated, or succeeded-without-final-text output is partial evidence. Codex must verify every finding against real files and commands.
 
+A foreground call returns at most the last 20000 characters of each stream (captured at 100000) and reports `stdoutTruncated` / `stderrTruncated`. The full buffers still feed `outputSummary`, so read the answer there, not from the tail.
+
 `opencode_result`'s `maxChars` has an effective range of `1..100000` (default `20000`); a larger request is clamped and reported as `maxChars` plus `maxCharsClamped: true` rather than refused. Widening the window is not how to reach a conclusion — read `outputSummary`.
 
 `opencode_status`, `opencode_result`, and `opencode_cancel` return `ok` for the **job's** outcome, not the query's: a `failed` or `cancelled` job returns `ok: false` with `error: { code, message, retryable }`. `terminal: true` means the record is final — `nextAction` then reads `do not poll again; the record is final`, and polling a job that has been terminal for over five minutes adds a warning. A non-terminal job's `nextAction` says to wait, and never to call status and result at the same instant.

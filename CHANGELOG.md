@@ -37,6 +37,14 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   of a tail. The schema now accepts up to `1000000`, the store clamps to `1..100000`, and
   the response reports the effective `maxChars` and `maxCharsClamped`.
 
+- **OC-10 / M5** A foreground (`background:false`) call now captures at most 100000
+  characters per stream and returns the last 20000, with `stdoutTruncated` /
+  `stderrTruncated` saying so. It used to capture 1000000 and return all of it, making
+  the synchronous path 10–50× wider than the background path for no reason: 1,061
+  recorded payloads exceeded 50,000 characters and the largest was 1,341,598. The
+  complete buffers still feed `outputSummary` and the JSONL error detector, so
+  diagnosis is unaffected — and `outputSummary.finalText` (OC-5) now carries the answer
+  the tail no longer has to.
 - **OX4** OpenCode discovery is memoised for the life of the MCP server process, an
   explicitly configured binary (`opencodeBin`, `OPENCODE_BIN`) is trusted once it is
   executable instead of being gated on `--version`, and the probe budget rose from 5s to

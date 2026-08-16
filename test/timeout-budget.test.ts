@@ -1,10 +1,12 @@
 import { describe, expect, test } from "vitest";
+import { toPublicJob, type JobRecord } from "../plugins/opencode-plugin-codex/src/job-store.js";
 import {
   DEFAULT_TIMEOUT_MS,
   FOREGROUND_MAX_TIMEOUT_MS,
   KIND_P90_MS,
   resolveTimeoutBudget,
-  timeoutSchema
+  timeoutSchema,
+  TYPICAL_WALL_TIME_NOTE
 } from "../plugins/opencode-plugin-codex/src/timeout-budget.js";
 
 describe("timeoutSchema", () => {
@@ -102,5 +104,64 @@ describe("resolveTimeoutBudget", () => {
 
     expect(budget.warnings[0]).toMatch(/n=\d+/);
     expect(budget.warnings[0]).toContain("2026-08-15");
+  });
+});
+
+describe("published cancel guidance", () => {
+  /** Every field a caller can actually observe on a job record. */
+  function publicJobFields(): string[] {
+    const populated = {
+      id: "job_1",
+      kind: "run",
+      status: "running",
+      cwd: "/repo",
+      command: "/bin/opencode",
+      args: ["run"],
+      workerPid: 1,
+      pid: 2,
+      opencodeSessionId: "ses_1",
+      modelSelection: { source: "opencode_config" },
+      createdAt: "2026-08-16T00:00:00.000Z",
+      startedAt: "2026-08-16T00:00:00.000Z",
+      finishedAt: "2026-08-16T00:00:01.000Z",
+      lastEventAt: "2026-08-16T00:00:01.000Z",
+      timeoutMs: 600_000,
+      maxToolCalls: 5,
+      toolBudgetReached: true,
+      exitCode: 0,
+      signal: null,
+      errorClass: "timeout",
+      errorMessage: "…",
+      resumable: true,
+      cancelRequestedAt: "2026-08-16T00:00:02.000Z",
+      terminalSummary: { state: "succeeded_with_text", resultComplete: true },
+      outputTruncated: false,
+      stdoutPath: "/state/out",
+      stderrPath: "/state/err"
+    } as unknown as JobRecord;
+    return Object.keys(toPublicJob(populated));
+  }
+
+  test("names only signals the wire can emit", () => {
+    // The 0.1-era note told callers not to cancel "unless status shows
+    // waitingForAuth". That string occurred exactly twice in the tree — in this
+    // note and in the changelog entry announcing it — and nothing could ever
+    // produce it, so the one published exception to "wait for timeoutMs" was a
+    // condition a caller could watch for forever.
+    const observable = new Set([...publicJobFields(), "timeoutMs", "waited", "terminal", "nextAction"]);
+    const named = TYPICAL_WALL_TIME_NOTE.match(/\b[a-z]+[A-Z][A-Za-z]*\b/g) ?? [];
+
+    expect(named.length).toBeGreaterThan(0);
+    for (const field of named) {
+      expect(observable, `${field} is published but no field can carry it`).toContain(field);
+    }
+    expect(TYPICAL_WALL_TIME_NOTE).toContain("lastEventAt");
+  });
+
+  test("keeps the silence exception that opencode_status can support", () => {
+    // lastEventAt is persisted by the worker on every chunk, so "silent for 45s"
+    // stays checkable — it is the same clock the no-progress watchdog reads.
+    expect(TYPICAL_WALL_TIME_NOTE).toMatch(/45s/);
+    expect(timeoutSchema.description ?? "").toContain("lastEventAt");
   });
 });

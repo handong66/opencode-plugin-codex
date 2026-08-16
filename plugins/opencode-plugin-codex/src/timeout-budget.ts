@@ -54,12 +54,19 @@ export const KIND_MEDIAN_MS: Partial<Record<JobKind, number>> = {
   adversarial_review: 223_000
 };
 
-/** One sentence, published on every tool that starts or observes a job. */
+/**
+ * One sentence, published on every tool that starts or observes a job.
+ *
+ * Every signal named here must be one the wire can actually carry. The 0.1-era
+ * wording told callers to wait for a `waitingForAuth` status that no JobRecord, no
+ * public projection and no envelope field has ever been able to emit; `lastEventAt`
+ * is on the public record and is the clock the no-progress watchdog reads too.
+ */
 export const TYPICAL_WALL_TIME_NOTE =
   "Typical wall time on this machine (median): continue ~62s, run ~129s, review ~171s, adversarial_review ~223s; " +
-  "successful jobs overall run ~99s median and ~278s p90. Do not cancel before timeoutMs unless status shows " +
-  "waitingForAuth or zero events for more than 45s — 26 of 43 recorded cancellations came before 120s, while the job " +
-  "was still on schedule.";
+  "successful jobs overall run ~99s median and ~278s p90. Do not cancel before timeoutMs unless opencode_status " +
+  "reports a lastEventAt more than 45s in the past — 26 of 43 recorded cancellations came before 120s, while the " +
+  "job was still on schedule.";
 
 export const KIND_P90_SAMPLE_SIZE: Partial<Record<JobKind, number>> = {
   continue: 290,

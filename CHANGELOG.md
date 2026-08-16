@@ -268,9 +268,12 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 - **X7** The `timeoutMs` description and `opencode_status` now publish the typical
   wall time per kind (continue ~62s, run ~129s, review ~171s, adversarial_review
   ~223s; ~99s median overall, ~278s p90) and say not to cancel before `timeoutMs`
-  unless status shows `waitingForAuth` or no events for 45s. 43 recorded
-  cancellations came at a median of 107s elapsed — 26 of them under 120s — while the
-  job was still on schedule.
+  unless `opencode_status` reports a `lastEventAt` more than 45s in the past. 43
+  recorded cancellations came at a median of 107s elapsed — 26 of them under 120s —
+  while the job was still on schedule. The exception names `lastEventAt` because that
+  field is on the public record: the first draft of this sentence named a
+  `waitingForAuth` status no record, projection or envelope could ever emit, so the
+  one published reason to cancel early was unobservable.
 - **OX7** A no-progress watchdog. The background worker records `lastEventAt` on
   every chunk (persisted at most every 10s, and returned on the record), and a run
   that has produced almost nothing (under 4000 characters), has **never made a tool

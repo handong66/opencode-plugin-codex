@@ -429,6 +429,14 @@ const HEADLESS_DELEGATION_PREAMBLE =
  * Fail a provider id that only differs by case from one `opencode_check` already
  * enumerated in this process. Nothing is spawned for this: it uses the listing that
  * is already cached, and says nothing at all when there is none.
+ *
+ * The refusal is one-directional on purpose. `opencode providers list` prints
+ * display names ("AIHubMix"), and a parse that mistook one for an id would other-
+ * wise make this guard demand `AIHubMix/...` — the spelling that ran five jobs and
+ * succeeded zero times — from a caller who already had it right. Provider ids are
+ * lowercase, so only a lowercase enumerated id is treated as the authority on
+ * spelling; anything else is our parse being unsure, and an unsure parse must not
+ * refuse the caller's work.
  */
 function assertKnownProviderSpelling(model: string): void {
   const provider = splitModel(model).providerID;
@@ -438,7 +446,7 @@ function assertKnownProviderSpelling(model: string): void {
   // Only the proven failure is refused. An id that matches nothing may be a provider
   // configured since the last listing, and refusing that would be the plugin
   // guessing about the user's configuration.
-  if (caseMatch) {
+  if (caseMatch && caseMatch === caseMatch.toLowerCase()) {
     throw providerIdCaseMismatch({ requested: model, provider, knownProvider: caseMatch, knownProviders: known });
   }
 }
@@ -713,6 +721,17 @@ async function opencodeCheckImpl(
         data,
         warnings
       });
+    }
+    if (providers.lines.length && !providers.ids.length) {
+      // The 1.18.16 banner lists display names ("AIHubMix"), and the id for that is
+      // `aihubmix`. An empty `providerIds` here means the listing format did not
+      // hand us ids — not that no provider is configured — so say so rather than
+      // let a caller read the empty array as an answer.
+      warnings.push(
+        "This OpenCode build lists providers by display name, so no provider ids could be parsed: providerIds is " +
+          "empty and the pre-submission spelling check is inactive for this session. Read `providers` for the " +
+          "names; provider ids are their lowercase form (\"AIHubMix\" is `aihubmix`)."
+      );
     }
   }
 

@@ -24,20 +24,41 @@ export type ProviderListing = {
 
 export type CachedProviders = ProviderListing & { cacheHit: boolean };
 
-const PROVIDER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+/**
+ * A provider id, not a provider's display name.
+ *
+ * `opencode providers list` (1.18.16) prints a credentials banner of display names:
+ *
+ *     ┌  Credentials ~/.local/share/opencode/auth.json
+ *     ●  AIHubMix api
+ *     ●  DeepSeek api
+ *     └  2 credentials
+ *
+ * The ids there are `aihubmix` and `deepseek`. Accepting any first token as an id
+ * made "2" a provider in that output, and on a format that drops the bullet it
+ * would make "AIHubMix" one — which is worse than useless downstream, because the
+ * case guard would then refuse `aihubmix/...` and demand the spelling that ran five
+ * jobs and succeeded zero times. Ids are lowercase, so only a lowercase,
+ * letter-initial token is claimed as one. Nothing is ever lowercased to fit: a
+ * display name is simply not reported as an id.
+ */
+const PROVIDER_ID_PATTERN = /^[a-z][a-z0-9._-]+$/;
+
+/** Box-drawing and bullet glyphs the CLI uses to draw its list. */
+const LIST_DECORATION = /^[\s│├└┌┐┘─◇◆●○▪•*-]+/u;
 
 /**
  * Turn CLI list output into lines and ids.
  *
  * Deliberately shallow: the lines are the CLI's own, with escapes removed, and an
- * id is only taken from a line whose first token looks like one. Guessing more
- * structure than the CLI documents is how a caller ends up trusting a parse that
- * silently goes empty on the next release.
+ * id is only taken from a line whose first token already looks like an id. Guessing
+ * more structure than the CLI documents is how a caller ends up trusting a parse
+ * that silently goes empty on the next release.
  */
 export function parseListOutput(raw: string): { lines: string[]; ids: string[] } {
   const lines = stripAnsi(raw)
     .split(/\r?\n/)
-    .map((line) => line.replace(/^[\s│├└─•*-]+/, "").trim())
+    .map((line) => line.replace(LIST_DECORATION, "").trim())
     .filter((line) => line.length > 0);
   const ids: string[] = [];
   for (const line of lines) {

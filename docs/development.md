@@ -95,7 +95,11 @@ Results are cached per binary and directory for the life of the MCP server proce
 
 There is no `cacheTtlMs`, on purpose. What invalidates this answer is a user installing a CLI or editing a config file, which no interval predicts; publishing a TTL the plugin does not enforce would be a false promise.
 
-Listings are parsed into arrays with ANSI escapes stripped by `src/ansi.ts`, and a listing that exits non-zero is `ok: false` with `provider_listing_failed` instead of a `Provider not found` message wrapped inside a success. Once providers have been enumerated, an explicit model whose provider id differs from an enumerated one only in case is refused before the job starts, with the correct spelling in `details.knownProviders`. The plugin never rewrites the id itself — silent normalisation was rejected.
+Listings are parsed into arrays with ANSI escapes stripped by `src/ansi.ts`, and a listing that exits non-zero is `ok: false` with `provider_listing_failed` instead of a `Provider not found` message wrapped inside a success.
+
+`providers list` is a banner of **display names** in OpenCode 1.18.16 (`● AIHubMix api`), while the provider id is `aihubmix`. `parseListOutput` therefore claims a token as an id only when it already looks like one — lowercase and letter-initial — and reports `providerIds: []` plus a warning when a listing yields no ids at all, rather than passing display names off as ids. Reading the name as an id is not a cosmetic error: the spelling guard below would then refuse the id that works.
+
+Once providers have been enumerated, an explicit model whose provider id differs from an enumerated **lowercase** id only in case is refused before the job starts, with the correct spelling in `details.knownProviders`. The check is one-directional by design — an enumerated id that is not lowercase means the parse is unsure, and an unsure parse must not refuse the caller's work. The plugin never rewrites the id itself either; silent normalisation was rejected.
 
 ## OpenCode CLI contract
 

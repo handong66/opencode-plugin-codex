@@ -19,6 +19,7 @@ afterEach(() => {
 
 type CheckResult = {
   ok: boolean;
+  warnings: string[];
   version?: string;
   agents?: string[];
   proxy?: Record<string, string>;
@@ -29,7 +30,18 @@ type CheckResult = {
   cache?: { providersCachedAt?: string; providersCacheHit?: boolean };
 };
 
-async function withCountingCli<T>(run: (context: { counts: string }) => Promise<T>): Promise<T> {
+/** The id-first listing the guard was written against: `aihubmix` is the id. */
+const ID_FIRST_PROVIDER_LISTING = [
+  "  const esc = String.fromCharCode(27);",
+  "  console.log(esc + '[1mProviders' + esc + '[0m');",
+  "  console.log('  ' + esc + '[32maihubmix' + esc + '[0m  AIHubMix gateway');",
+  "  console.log('  deepseek  DeepSeek');"
+];
+
+async function withCountingCli<T>(
+  run: (context: { counts: string }) => Promise<T>,
+  providerListing: string[] = ID_FIRST_PROVIDER_LISTING
+): Promise<T> {
   const binDir = await mkdtemp(join(tmpdir(), "opencode-plugin-codex-check-"));
   const previousBin = process.env.OPENCODE_BIN;
   const previousCounts = process.env.FAKE_CHECK_COUNTS;
@@ -47,10 +59,7 @@ async function withCountingCli<T>(run: (context: { counts: string }) => Promise<
         "if (process.argv[2] === 'debug') { console.log(JSON.stringify({ model: 'aihubmix/x' })); process.exit(0); }",
         "if (process.argv[2] === 'agent') { console.log('build'); console.log('plan'); process.exit(0); }",
         "if (process.argv[2] === 'providers') {",
-        "  const esc = String.fromCharCode(27);",
-        "  console.log(esc + '[1mProviders' + esc + '[0m');",
-        "  console.log('  ' + esc + '[32maihubmix' + esc + '[0m  AIHubMix gateway');",
-        "  console.log('  deepseek  DeepSeek');",
+        ...providerListing,
         "  process.exit(0);",
         "}",
         "console.log('{}');"
@@ -85,7 +94,35 @@ describe("stripAnsi and parseListOutput", () => {
     );
 
     expect(lines).toEqual(["Providers", "aihubmix  AIHubMix gateway", "deepseek  DeepSeek"]);
-    expect(ids).toEqual(["Providers", "aihubmix", "deepseek"]);
+    // The banner word "Providers" is not a provider. An id is only claimed when the
+    // token already looks like one; nothing is lowercased to make it fit.
+    expect(ids).toEqual(["aihubmix", "deepseek"]);
+  });
+
+  test("claims no ids from the real credentials banner", () => {
+    // Captured verbatim from `opencode providers list` (OpenCode 1.18.16, 2026-08-16).
+    // The listing prints display names, not ids: the id for "AIHubMix" is `aihubmix`.
+    // Taking the first token of every line made "2" a provider here, and would make
+    // "AIHubMix" one on any format that drops the bullet — which is the spelling the
+    // audit shows failing 5 jobs out of 5.
+    const { lines, ids } = parseListOutput(
+      `${ESC}[0m\n` +
+        `┌  Credentials ${ESC}[90m~/.local/share/opencode/auth.json\n` +
+        "│\n" +
+        `●  AIHubMix ${ESC}[90mapi\n` +
+        "│\n" +
+        `●  DeepSeek ${ESC}[90mapi\n` +
+        "│\n" +
+        "└  2 credentials\n"
+    );
+
+    expect(lines).toEqual([
+      "Credentials ~/.local/share/opencode/auth.json",
+      "AIHubMix api",
+      "DeepSeek api",
+      "2 credentials"
+    ]);
+    expect(ids).toEqual([]);
   });
 });
 
@@ -210,6 +247,32 @@ describe("provider id spelling", () => {
       // refuse; only the proven case-mismatch failure is.
       expect(response.ok).toBe(true);
     });
+  });
+
+  test("never refuses the lowercase id because the listing showed a display name", async () => {
+    // The real `opencode providers list` prints "AIHubMix", not "aihubmix". If a
+    // listing format ever puts that name where the id goes, the guard must not turn
+    // around and demand "AIHubMix/..." — the spelling that ran five jobs and
+    // succeeded zero times — from a caller who already had it right.
+    await withCountingCli(
+      async () => {
+        const check = readEnvelope<CheckResult>(await opencodeCheck({ cwd: process.cwd() }));
+        expect(check.providerIds).toEqual([]);
+        expect(check.warnings.join(" ")).toContain("provider ids");
+
+        const response = readEnvelope<{ ok: boolean }>(
+          await opencodeRun({
+            cwd: process.cwd(),
+            background: false,
+            prompt: "display-name listing probe",
+            model: "aihubmix/deep-deepseek-v4-pro"
+          })
+        );
+
+        expect(response.ok).toBe(true);
+      },
+      ["  console.log('AIHubMix  api');", "  console.log('DeepSeek  api');"]
+    );
   });
 
   test("stays silent when no listing has been taken in this process", async () => {

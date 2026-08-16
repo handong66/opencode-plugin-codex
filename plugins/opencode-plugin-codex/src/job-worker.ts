@@ -12,6 +12,23 @@ import { JobStore, type JobRecord } from "./job-store.js";
 
 const MAX_CAPTURE_CHARS = 1_000_000;
 
+/**
+ * No-progress watchdog.
+ *
+ * A model-level hang and a tool loop looked identical to the caller: both burned
+ * the whole budget. The recorded hangs produced a 304-byte stdout — a single
+ * `step_start` — while the same task on an explicit lighter model finished in about
+ * 15 seconds. The watchdog only fires while the run has produced almost nothing:
+ * once real output is flowing, silence is a long tool call, not a hang, and killing
+ * that would throw away work the timeout branch can still resume.
+ */
+const STALL_TIMEOUT_MS = 45_000;
+const STALL_MAX_STDOUT_CHARS = 4_000;
+const STALL_CHECK_INTERVAL_MS = 5_000;
+
+/** How often the record's lastEventAt is persisted while a job runs. */
+const LAST_EVENT_PERSIST_MS = 10_000;
+
 /** Ceiling on the extra pass that asks for the final answer. */
 const FINAL_ANSWER_MAX_MS = 120_000;
 const FINAL_ANSWER_MIN_MS = 30_000;
@@ -111,6 +128,10 @@ async function main(): Promise<void> {
   let streamSessionId: string | undefined = record.opencodeSessionId;
   let pendingLine = "";
   let toolBudgetReached = false;
+  let lastEventAt = Date.now();
+  let lastEventPersistedAt = 0;
+  let stalled: { silentMs: number } | undefined;
+  let stallTimer: NodeJS.Timeout | undefined;
   let forceKillTimer: NodeJS.Timeout | undefined;
   let flushTimer: NodeJS.Timeout | undefined;
   let flushChain = Promise.resolve();
@@ -134,6 +155,23 @@ async function main(): Promise<void> {
       void flushLogs();
     }, 25);
     flushTimer.unref();
+  };
+
+  /**
+   * Record when output last arrived, throttled: a caller polling status can then
+   * tell "still working" from "silent since", and the watchdog reads the same clock.
+   */
+  const noteEvent = () => {
+    lastEventAt = Date.now();
+    if (lastEventAt - lastEventPersistedAt < LAST_EVENT_PERSIST_MS) return;
+    lastEventPersistedAt = lastEventAt;
+    const at = new Date(lastEventAt).toISOString();
+    void (async () => {
+      const stored = await store.read(jobId).catch(() => undefined);
+      if (!stored || ["succeeded", "failed", "cancelled"].includes(stored.status)) return;
+      stored.lastEventAt = at;
+      await store.write(stored).catch(() => undefined);
+    })();
   };
 
   const requestCancel = () => {
@@ -218,6 +256,7 @@ async function main(): Promise<void> {
       const appended = appendTail(stdout, chunk);
       stdout = appended.value;
       outputTruncated ||= appended.truncated;
+      noteEvent();
       trackProgress(chunk);
       scheduleFlush();
     });
@@ -225,11 +264,23 @@ async function main(): Promise<void> {
       const appended = appendTail(stderr, chunk);
       stderr = appended.value;
       outputTruncated ||= appended.truncated;
+      noteEvent();
       scheduleFlush();
     });
     record.pid = child.pid;
     await store.write(record);
     child.stdin?.end(prompt);
+
+    stallTimer = setInterval(() => {
+      if (stalled || timedOut || cancelRequested || toolBudgetReached) return;
+      const silentMs = Date.now() - lastEventAt;
+      if (silentMs < STALL_TIMEOUT_MS || stdout.length >= STALL_MAX_STDOUT_CHARS) return;
+      stalled = { silentMs };
+      signalTree(child, "SIGTERM");
+      forceKillTimer ??= setTimeout(() => signalTree(child, "SIGKILL"), 2_000);
+      forceKillTimer.unref();
+    }, STALL_CHECK_INTERVAL_MS);
+    stallTimer.unref();
 
     const timeout = setTimeout(() => {
       timedOut = true;
@@ -241,6 +292,8 @@ async function main(): Promise<void> {
 
     let [outcome, stdinError] = await Promise.all([outcomePromise, stdinOutcomePromise]);
     clearTimeout(timeout);
+    if (stallTimer) clearInterval(stallTimer);
+    stallTimer = undefined;
     if (forceKillTimer) clearTimeout(forceKillTimer);
     forceKillTimer = undefined;
 
@@ -297,17 +350,23 @@ async function main(): Promise<void> {
     if (flushTimer) clearTimeout(flushTimer);
     await flushLogs();
     const latest = finalizeJobRecord({
-      record: { ...(await store.read(jobId)), toolBudgetReached: toolBudgetReached || undefined },
+      record: {
+        ...(await store.read(jobId)),
+        toolBudgetReached: toolBudgetReached || undefined,
+        lastEventAt: new Date(lastEventAt).toISOString()
+      },
       stdout,
       stderr,
       outcome,
       timedOut,
+      stalled,
       cancelRequested,
       stdinError,
       outputTruncated
     });
     await store.write(latest);
   } catch (error) {
+    if (stallTimer) clearInterval(stallTimer);
     await rm(store.inputPath(jobId), { force: true });
     record = await store.read(jobId).catch(() => record);
     if (record.status !== "cancelled") {

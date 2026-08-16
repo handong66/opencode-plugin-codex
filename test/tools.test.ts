@@ -783,16 +783,21 @@ describe("opencodeResult", () => {
 
   test("does not offer a resume handle for a timeout that produced no session id", async () => {
     const jobId = "job_timeout_no_handle";
+    // Tool calls but no session id: the work happened, the handle did not survive.
+    const stdout = [
+      JSON.stringify({ type: "step_start" }),
+      JSON.stringify({ type: "tool_use", part: { type: "tool", tool: "read", state: { input: { filePath: "a.ts" } } } })
+    ].join("\n");
     const result = parseToolResult(
       await withTempJob(
         {
           id: jobId,
           status: "failed",
           errorClass: "timeout",
-          errorMessage: "OpenCode exceeded timeoutMs=120000 after producing 0 events. No OpenCode session id was observed.",
+          errorMessage: "OpenCode exceeded timeoutMs=120000 after producing 2 events. No OpenCode session id was observed.",
           resumable: false
         },
-        "",
+        stdout,
         "",
         () => opencodeResult({ jobId })
       )
@@ -800,6 +805,32 @@ describe("opencodeResult", () => {
 
     const guidance = result.outputSummary?.guidance ?? "";
     expect(guidance).toMatch(/no OpenCode session id/i);
+    expect(guidance).not.toContain("opencode_continue{sessionId");
+  });
+
+  test("routes a timeout with zero tool calls to the provider, not to a bigger budget", async () => {
+    const jobId = "job_timeout_no_events";
+    const result = parseToolResult(
+      await withTempJob(
+        {
+          id: jobId,
+          status: "failed",
+          errorClass: "timeout",
+          timeoutMs: 120_000,
+          errorMessage: "OpenCode exceeded timeoutMs=120000 after producing 1 events.",
+          resumable: false
+        },
+        JSON.stringify({ type: "step_start" }),
+        "",
+        () => opencodeResult({ jobId })
+      )
+    );
+
+    // The recorded case: two calls burned 120000ms and 180000ms producing one
+    // step_start each, then the same task finished in ~15s on a lighter model.
+    const guidance = result.outputSummary?.guidance ?? "";
+    expect(guidance).toMatch(/without making a single tool call/i);
+    expect(guidance).toMatch(/lighter explicit model/i);
     expect(guidance).not.toContain("opencode_continue{sessionId");
   });
 

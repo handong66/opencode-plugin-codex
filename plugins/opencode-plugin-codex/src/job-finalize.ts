@@ -63,6 +63,8 @@ export type FinalizeJobParams = {
   stderr: string;
   outcome: JobOutcome;
   timedOut: boolean;
+  /** The no-progress watchdog ended it: silence with nothing to show for it. */
+  stalled?: { silentMs: number };
   cancelRequested: boolean;
   stdinError?: Error;
   outputTruncated?: boolean;
@@ -94,6 +96,23 @@ export function finalizeJobRecord(params: FinalizeJobParams): JobRecord {
 
   if (latest.status === "cancelled" || latest.cancelRequestedAt || params.cancelRequested) {
     latest.status = "cancelled";
+    return latest;
+  }
+
+  // A stall is not a spent budget: a run that produced nothing at all for the
+  // silence window was never going to finish, and 45s of it costs a whole
+  // timeoutMs to discover otherwise. Two recorded jobs held a 304-byte stdout
+  // (one step_start) until their budget ran out; a third pair of foreground calls
+  // burned 120000 and 180000ms the same way before the same task, on an explicit
+  // lighter model, finished in about 15 seconds.
+  if (params.stalled && !params.timedOut) {
+    latest.status = "failed";
+    latest.errorClass = "stalled";
+    latest.resumable = Boolean(latest.opencodeSessionId);
+    latest.errorMessage =
+      `OpenCode produced no output for ${Math.round(params.stalled.silentMs / 1_000)}s and had emitted ` +
+      `${eventCount} event(s) in total, so the run was ended early instead of holding the ${latest.timeoutMs}ms budget. ` +
+      "This looks like a provider or model hang rather than slow work.";
     return latest;
   }
 

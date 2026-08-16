@@ -155,6 +155,19 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 
 ### Added
 
+- **OX7** A no-progress watchdog. The background worker records `lastEventAt` on
+  every chunk (persisted at most every 10s, and returned on the record), and a run
+  that has produced almost nothing (under 4000 characters) and then falls silent for
+  45s is ended early as `errorClass: "stalled"` (retryable) instead of holding its
+  whole budget. Two recorded jobs held a 304-byte stdout — one `step_start` — until
+  their budget expired, and a foreground pair burned 120000ms and 180000ms the same
+  way before the same task finished in about 15 seconds on an explicit lighter model.
+  The watchdog deliberately stops applying once real output is flowing: after that,
+  silence is a long tool call, and killing it would discard resumable work.
+- **OX7** `timeout` guidance now branches on what the run actually did. Zero tool
+  calls plus a spent budget is reported as a provider or model hang — raise nothing,
+  change model or check the provider and proxy — while a timeout after real tool
+  calls keeps the resume-the-session advice.
 - **OX6** `opencode_check` is cached for the life of the MCP server process and no
   longer re-runs the CLI on every call: 471 recorded calls in two months, 124 of them
   on one day, 456 of which returned the same binary, version, and provider banner.

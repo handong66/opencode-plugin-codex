@@ -517,6 +517,8 @@ export function openCodeFailureMessage(errorClass: string): string {
       return "OpenCode was terminated by a signal before producing a final result.";
     case "timeout":
       return "OpenCode exceeded its wall-clock budget.";
+    case "stalled":
+      return "OpenCode produced no output at all for the stall window, which is a provider or model hang rather than slow work. Retry with a lighter explicit model, or check the provider and proxy configuration.";
     default:
       return "OpenCode exited without a usable final result.";
   }

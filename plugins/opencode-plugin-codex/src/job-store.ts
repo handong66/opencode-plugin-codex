@@ -46,6 +46,12 @@ export type JobRecord = {
   createdAt: string;
   startedAt?: string;
   finishedAt?: string;
+  /**
+   * When the worker last saw any output from OpenCode. Two recorded jobs produced a
+   * 304-byte stdout — one `step_start` and nothing else — and were indistinguishable
+   * from a job doing real work until their whole budget ran out.
+   */
+  lastEventAt?: string;
   timeoutMs: number;
   /**
    * Optional ceiling on tool calls. Reaching it does not kill the job: the worker
@@ -91,6 +97,7 @@ export type PublicJobRecord = Pick<
   | "timeoutMs"
   | "maxToolCalls"
   | "toolBudgetReached"
+  | "lastEventAt"
   | "opencodeSessionId"
   | "modelSelection"
   | "resumable"
@@ -113,6 +120,7 @@ const PUBLIC_JOB_FIELDS = [
   "timeoutMs",
   "maxToolCalls",
   "toolBudgetReached",
+  "lastEventAt",
   "opencodeSessionId",
   "modelSelection",
   "resumable",
@@ -432,16 +440,35 @@ export function summarizeOpenCodeOutput(record: JobRecord, stdout: string, stder
     guidance = "OpenCode is still running. Poll status/result later or cancel and rerun with a narrower target; do not treat current stdout as a final review.";
   } else if (record.status === "cancelled") {
     guidance = "OpenCode was cancelled. stdout/stderr are partial logs only; do not treat them as a final review or implementation result.";
+  } else if (record.errorClass === "stalled") {
+    // The watchdog only fires on silence with nothing to show for it, so this is
+    // the provider/model half of what used to be one undifferentiated "timeout".
+    guidance =
+      "OpenCode produced no output at all before the stall window expired, so this is a provider or model hang, " +
+      "not slow work: a larger timeoutMs will not help. Retry with a lighter explicit model, or check the " +
+      "provider, credentials, and any HTTP(S)_PROXY in effect. One recorded case finished in about 15 seconds " +
+      "on an explicit lighter model after two calls had burned 120000ms and 180000ms producing one event each.";
   } else if (record.errorClass === "timeout" && !structuredError) {
     // A timeout is a budget failure, not an error: the OpenCode session still holds
     // the work, so "rerun with a narrower prompt" throws away everything it did.
     const sessionId = record.opencodeSessionId ?? openCodeSessionId;
-    guidance = sessionId
-      ? `OpenCode hit the wall-clock budget, not an error. Session ${sessionId} retains the work. ` +
-        `Resume with opencode_continue{sessionId:"${sessionId}", prompt:"Continue and produce only the final findings now."} and a larger timeoutMs. ` +
-        "Re-verify any file it cites — the tree may have changed since the pause."
-      : "OpenCode hit the wall-clock budget, not an error, but no OpenCode session id appeared in its output, " +
-        "so there is no resume handle. Rerun with the default timeoutMs of 600000 before narrowing the target.";
+    // Zero tool calls and a spent budget is a different failure from a run that did
+    // 37 reads and ran out of time; the old single message covered both.
+    if (toolCallCount === 0) {
+      guidance =
+        `OpenCode spent the whole ${record.timeoutMs}ms budget without making a single tool call ` +
+        `(${Object.values(eventCounts).reduce((total, count) => total + count, 0)} stream event(s) in total). ` +
+        "That is a provider or model hang, not a budget that was too small: raising timeoutMs repeats it. " +
+        "Retry with a lighter explicit model, or check the provider, credentials, and any HTTP(S)_PROXY in effect." +
+        (sessionId ? ` The session is ${sessionId} if you want to inspect it.` : "");
+    } else {
+      guidance = sessionId
+        ? `OpenCode hit the wall-clock budget after ${toolCallCount} tool call(s), not an error. Session ${sessionId} retains the work. ` +
+          `Resume with opencode_continue{sessionId:"${sessionId}", prompt:"Continue and produce only the final findings now."} and a larger timeoutMs. ` +
+          "Re-verify any file it cites — the tree may have changed since the pause."
+        : `OpenCode hit the wall-clock budget after ${toolCallCount} tool call(s), not an error, but no OpenCode session id appeared in its output, ` +
+          "so there is no resume handle. Rerun with the default timeoutMs of 600000 before narrowing the target.";
+    }
   } else if (record.status === "failed" || structuredError) {
     const failureClass = structuredError?.errorClass ?? record.errorClass;
     guidance = isRetryableOpenCodeFailure(failureClass)

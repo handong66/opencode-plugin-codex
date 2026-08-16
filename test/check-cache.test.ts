@@ -173,6 +173,31 @@ describe("opencode_check caching", () => {
     }
   });
 
+  test("reports the proxy endpoint without its credentials", async () => {
+    const previousProxy = process.env.HTTPS_PROXY;
+    const previousAll = process.env.ALL_PROXY;
+    // The corporate form. This answer is persisted in the model transcript, and the
+    // diagnostic is "which proxy is in the way", never the password.
+    process.env.HTTPS_PROXY = "http://alice:s3cr3t-token@proxy.corp.example:3128";
+    process.env.ALL_PROXY = "bob:hunter2@127.0.0.1:7897";
+    try {
+      await withCountingCli(async () => {
+        const result = readEnvelope<CheckResult>(await opencodeCheck({ cwd: process.cwd() }));
+
+        expect(result.proxy?.HTTPS_PROXY).toBe("http://***@proxy.corp.example:3128");
+        expect(result.proxy?.ALL_PROXY).toBe("***@127.0.0.1:7897");
+        expect(JSON.stringify(result)).not.toContain("s3cr3t-token");
+        expect(JSON.stringify(result)).not.toContain("hunter2");
+        expect(JSON.stringify(result)).not.toContain("alice");
+      });
+    } finally {
+      if (previousProxy === undefined) delete process.env.HTTPS_PROXY;
+      else process.env.HTTPS_PROXY = previousProxy;
+      if (previousAll === undefined) delete process.env.ALL_PROXY;
+      else process.env.ALL_PROXY = previousAll;
+    }
+  });
+
   test("reports a leftover 0.1-era workspace state directory without deleting it", async () => {
     const workspace = await realpath(await mkdtemp(join(tmpdir(), "opencode-plugin-codex-legacy-")));
     const legacy = join(workspace, ".opencode-plugin-codex");

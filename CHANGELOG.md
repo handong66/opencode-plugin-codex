@@ -186,7 +186,9 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   is set, and it now runs `opencode agent list` and returns the agents. A global
   proxy was a day-0 failure surface — the user's own question after a failed run was
   whether their global proxy was the cause — and nothing in this diagnostic mentioned
-  either fact.
+  either fact. Userinfo in a proxy URL is masked (`http://***@proxy.corp:3128`):
+  the endpoint is the diagnostic, and the password would otherwise be persisted in
+  the model transcript.
 - **X10** `opencode_check` reports a leftover 0.1-era `\.opencode-plugin-codex` or
   `\.grok-plugin-codex` directory inside the workspace, with a note that it is safe
   to delete and safe to gitignore. One of these is still sitting in a user

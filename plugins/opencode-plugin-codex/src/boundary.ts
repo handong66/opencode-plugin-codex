@@ -20,6 +20,7 @@ export type BoundaryErrorCode =
   | "state_write_failed"
   | "cli_not_found"
   | "cli_probe_timeout"
+  | "job_not_found"
   /** Shares the OC-3 errorClass name so one orchestrator learns one table. */
   | "model_not_found";
 
@@ -36,6 +37,7 @@ const BOUNDARY_RETRYABLE: Record<BoundaryErrorCode, boolean> = {
   state_write_failed: false,
   cli_not_found: false,
   cli_probe_timeout: true,
+  job_not_found: false,
   model_not_found: false
 };
 
@@ -99,6 +101,26 @@ export function providerIdCaseMismatch(params: {
       `case-sensitive. Resubmit with model "${params.requested.replace(params.provider, params.knownProvider)}". ` +
       "The plugin does not rewrite the id for you.",
     { requested: params.requested, provider: params.provider, knownProviders: params.knownProviders }
+  );
+}
+
+/**
+ * No job record under that id.
+ *
+ * This is the one call a caller makes precisely because it has lost its handle, and
+ * it used to answer with Node's raw ENOENT: an MCP exception with no code, no
+ * `retryable`, no envelope — and the absolute state path of a private directory in
+ * its text, which is the leak `toPublicJob()` exists to prevent everywhere else.
+ * The id is the only thing echoed back here.
+ */
+export function jobNotFound(jobId: string): BoundaryError {
+  return new BoundaryError(
+    "job_not_found",
+    `No OpenCode job record for "${jobId}". Job ids come back from opencode_run / opencode_continue / ` +
+      "opencode_review / opencode_adversarial_review / opencode_rescue, and are private to the machine and " +
+      "state directory that started them. If the handle is lost, opencode_sessions lists the OpenCode sessions " +
+      "this workspace can resume with opencode_continue.",
+    { jobId }
   );
 }
 

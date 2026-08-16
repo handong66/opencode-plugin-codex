@@ -99,4 +99,33 @@ describe("job records on the wire", () => {
       }
     });
   });
+
+  test("an unknown job id is a typed refusal, not a raw ENOENT with the state path", async () => {
+    await withJob(async ({ stateDir }) => {
+      // This is the one call a caller makes *because* it lost its handle, and it
+      // used to answer with `isError: true`, no structuredContent, and the text
+      // "ENOENT: no such file or directory, open
+      // '/Users/<user>/.local/state/opencode-plugin-codex/jobs/<id>.json'".
+      for (const [name, response] of [
+        ["opencode_status", await opencodeStatus({ jobId: "job_does_not_exist_probe" })],
+        ["opencode_result", await opencodeResult({ jobId: "job_does_not_exist_probe" })],
+        ["opencode_cancel", await opencodeCancel({ jobId: "job_does_not_exist_probe" })]
+      ] as const) {
+        const envelope = response.structuredContent as {
+          ok: boolean;
+          error?: { code: string; retryable: boolean; message: string };
+        };
+        const serialized = JSON.stringify(response.structuredContent);
+
+        expect((response as { isError?: boolean }).isError, name).not.toBe(true);
+        expect(envelope.ok, name).toBe(false);
+        expect(envelope.error?.code, name).toBe("job_not_found");
+        expect(envelope.error?.retryable, name).toBe(false);
+        expect(envelope.error?.message, name).toContain("job_does_not_exist_probe");
+        expect(serialized, name).not.toContain(stateDir);
+        expect(serialized, name).not.toContain("ENOENT");
+        expect(serialized, name).not.toContain(".json");
+      }
+    });
+  });
 });

@@ -36,7 +36,8 @@ Returned, never thrown. All are `retryable: false` except `cli_probe_timeout`.
 | `state_write_failed` | The plugin's own state directory could not be written. The message names the directory and errno. |
 | `cli_not_found` | OpenCode was not found. The message lists what was tried and why each failed. |
 | `cli_probe_timeout` | A candidate binary existed but never answered `--version`. Retryable. |
-| `model_not_found` | Also raised before submission when an explicit provider id differs only in case from an enumerated one. |
+| `job_not_found` | No record under that job id: it belongs to another machine or state directory, or it is gone. Stop polling it. `opencode_sessions` lists sessions this workspace can resume with `opencode_continue`. |
+| `model_not_found` | Also raised before submission when an explicit provider id differs only in case from an enumerated lowercase id. |
 
 ## Job failure classes
 

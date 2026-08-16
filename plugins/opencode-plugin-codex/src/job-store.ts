@@ -15,7 +15,7 @@ import {
 } from "./opencode-cli.js";
 import { DEFAULT_TIMEOUT_MS } from "./timeout-budget.js";
 import type { ModelSelection } from "./model-guard.js";
-import { isBoundaryError, stateWriteFailed } from "./boundary.js";
+import { isBoundaryError, jobNotFound, stateWriteFailed } from "./boundary.js";
 
 export type JobKind =
   | "run"
@@ -689,7 +689,14 @@ export class JobStore {
   }
 
   async read(jobId: string): Promise<JobRecord> {
-    const raw = await readFile(this.jobPath(jobId), "utf8");
+    let raw: string;
+    try {
+      raw = await readFile(this.jobPath(jobId), "utf8");
+    } catch (error) {
+      // An unknown or expired id is a typed refusal, not a filesystem accident.
+      if ((error as NodeJS.ErrnoException)?.code === "ENOENT") throw jobNotFound(jobId);
+      throw error;
+    }
     const record = JSON.parse(raw) as JobRecord;
     if (record.id !== jobId) throw new Error("Job record ID does not match the requested job ID.");
     return {

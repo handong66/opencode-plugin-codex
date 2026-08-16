@@ -73,7 +73,8 @@ Since 0.2.0 every tool returns one shape:
 | `state_write_failed` | no | the state directory could not be written; carries the directory and errno |
 | `cli_not_found` | no | discovery found no OpenCode binary; carries the probed candidates |
 | `cli_probe_timeout` | yes | the discovery probe timed out — the one boundary a plain retry can fix |
-| `model_not_found` | no | an explicit provider id matches an enumerated one only in case; shares the OC-3 `errorClass` name on purpose |
+| `job_not_found` | no | `opencode_status` / `opencode_result` / `opencode_cancel` was given an id with no record; echoes the id only, never the state path |
+| `model_not_found` | no | an explicit provider id matches an enumerated lowercase one only in case; shares the OC-3 `errorClass` name on purpose |
 
 Codes shared with `grok-plugin-codex` (`workspace_unavailable`, `private_path_blocked`, `quota_exhausted`, `auth_required`, `network_error`, `timeout`, `terminated`) are reused verbatim so one orchestrator learns one table.
 

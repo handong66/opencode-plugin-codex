@@ -40,14 +40,22 @@ client.setRequestHandler(ListRootsRequestSchema, async () => ({
   roots: [{ uri: pathToFileURL(process.cwd()).href, name: "background-smoke-workspace" }]
 }));
 
-function firstText(result) {
-  return result.content?.find((item) => item.type === "text")?.text ?? "";
+/**
+ * Read the structured object, not `content[0].text`. Any real background job's
+ * opencode_result payload (record + stdout tail + outputSummary) is far past the
+ * 8192-character text budget, and above that the text block is a one-line
+ * `{ok, structuredContentOnly, payloadChars, note}` pointer — parsing it would
+ * leave outputSummary and stdout undefined and fail the smoke for the wrong reason.
+ */
+function structured(name, result) {
+  if (!result.structuredContent) throw new Error(`${name} returned no structuredContent: ${JSON.stringify(result)}`);
+  return result.structuredContent;
 }
 
 async function call(name, args) {
   const result = await client.callTool({ name, arguments: args }, undefined, { timeout: 30_000 });
   if (result.isError) throw new Error(`${name} returned MCP error: ${JSON.stringify(result)}`);
-  return JSON.parse(firstText(result));
+  return structured(name, result);
 }
 
 try {

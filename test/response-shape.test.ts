@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { JobStore } from "../plugins/opencode-plugin-codex/src/job-store.js";
@@ -69,4 +69,19 @@ describe("response payload duplication", () => {
       expect(structured.stdout).toContain("x".repeat(1_000));
     });
   });
+
+  // The two live smoke scripts are named as pre-release gates in the plugin README
+  // but run neither under `npm test` nor under `npm run check`, so nothing else in
+  // the suite notices when they drift back to reading `content[0].text` — where a
+  // real payload is now only the `structuredContentOnly` pointer.
+  test.each(["scripts/smoke-background.mjs", "scripts/live-transfer-smoke.mjs"])(
+    "%s reads the payload from structuredContent",
+    async (script) => {
+      const source = await readFile(join(process.cwd(), script), "utf8");
+
+      expect(source).toContain("result.structuredContent");
+      expect(source).not.toMatch(/JSON\.parse\(\s*firstText/);
+      expect(source).not.toMatch(/content\?\.\[0\]\?\.text|content\?\.find\(/);
+    }
+  );
 });

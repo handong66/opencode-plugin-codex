@@ -35,8 +35,16 @@ client.setRequestHandler(ListRootsRequestSchema, async () => ({
   roots: [{ uri: pathToFileURL(process.cwd()).href, name: "live-transfer-workspace" }]
 }));
 
-function firstText(result) {
-  return result.content?.find((item) => item.type === "text")?.text ?? "";
+/**
+ * Read the structured object, not `content[0].text`. A foreground opencode_continue
+ * at a 240000ms budget returns stdout/stderr tails plus outputSummary, which is well
+ * past the 8192-character text budget; above that the text block is a one-line
+ * `{ok, structuredContentOnly, payloadChars, note}` pointer, so parsing it would
+ * report a missing sentinel on a run that actually succeeded.
+ */
+function structured(name, result) {
+  if (!result.structuredContent) throw new Error(`${name} returned no structuredContent: ${JSON.stringify(result)}`);
+  return result.structuredContent;
 }
 
 try {
@@ -61,7 +69,7 @@ try {
     throw new Error(`opencode_transfer MCP error: ${JSON.stringify(transferResult)}`);
   }
 
-  const transfer = JSON.parse(firstText(transferResult));
+  const transfer = structured("opencode_transfer", transferResult);
   if (!transfer.ok || !transfer.opencodeSessionId) {
     throw new Error(`opencode_transfer failed: ${JSON.stringify(transfer, null, 2)}`);
   }
@@ -85,7 +93,7 @@ try {
     throw new Error(`opencode_continue MCP error: ${JSON.stringify(continueResult)}`);
   }
 
-  const continuation = JSON.parse(firstText(continueResult));
+  const continuation = structured("opencode_continue", continueResult);
   if (
     !continuation.ok ||
     continuation.outputSummary?.resultComplete !== true ||

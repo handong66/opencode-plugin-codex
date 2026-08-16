@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -8,7 +8,7 @@ import {
   probeEffectiveModel,
   resetEffectiveModelCache
 } from "../plugins/opencode-plugin-codex/src/model-guard.js";
-import { opencodeRun } from "../plugins/opencode-plugin-codex/src/tools.js";
+import { opencodeRun, opencodeTransfer } from "../plugins/opencode-plugin-codex/src/tools.js";
 import { resetOpenCodeDiscoveryCache } from "../plugins/opencode-plugin-codex/src/opencode-cli.js";
 import { readEnvelope } from "./helpers/envelope.js";
 
@@ -252,5 +252,91 @@ describe("execution tools report which model decided the call", () => {
         else process.env.OPENCODE_BIN = previous;
       }
     });
+  });
+});
+
+describe("which paths probe the configuration", () => {
+  /**
+   * A CLI that records every argv it is invoked with, so a test can say which
+   * subcommands a tool call actually spawned.
+   */
+  async function withRecordingCli<T>(run: (bin: string, logPath: string) => Promise<T>): Promise<T> {
+    const binDir = await mkdtemp(join(tmpdir(), "opencode-plugin-codex-probe-log-"));
+    const logPath = join(binDir, "argv.log");
+    try {
+      const bin = join(binDir, "recording-opencode.mjs");
+      await writeFile(
+        bin,
+        [
+          "#!/usr/bin/env node",
+          "import { appendFileSync } from 'node:fs';",
+          `appendFileSync(${JSON.stringify(logPath)}, process.argv.slice(2).join(' ') + '\\n');`,
+          "if (process.argv[2] === '--version') { console.log('1.18.16'); process.exit(0); }",
+          "if (process.argv[2] === 'debug') { console.log(JSON.stringify({ model: 'aihubmix/claude-opus-4-6' })); process.exit(0); }",
+          "if (process.argv[2] === 'import') { console.log('Imported session: ses_probe_log'); process.exit(0); }",
+          "if (process.argv[2] === 'export') { console.log(JSON.stringify({ info: { id: 'ses_probe_log' }, messages: [] })); process.exit(0); }",
+          "process.stdin.resume();",
+          "process.stdin.on('data', () => undefined);",
+          "process.stdin.on('end', () => console.log(JSON.stringify({ type: 'step_finish', sessionID: 'ses_probe_log' })));"
+        ].join("\n")
+      );
+      await chmod(bin, 0o755);
+      const previous = process.env.OPENCODE_BIN;
+      process.env.OPENCODE_BIN = bin;
+      try {
+        return await run(bin, logPath);
+      } finally {
+        if (previous === undefined) delete process.env.OPENCODE_BIN;
+        else process.env.OPENCODE_BIN = previous;
+      }
+    } finally {
+      await rm(binDir, { recursive: true, force: true });
+    }
+  }
+
+  async function probedConfig(logPath: string): Promise<boolean> {
+    const log = await readFile(logPath, "utf8").catch(() => "");
+    return log.split("\n").some((line) => line.startsWith("debug config"));
+  }
+
+  test("a submit with no explicit model does not spawn a config probe", async () => {
+    // 943 of 1,051 recorded jobs passed no model. With nothing requested there is
+    // nothing to compare against, and probing anyway would add a CLI process to the
+    // common path for a warning that could never fire.
+    const probed = await withRecordingCli(async (_bin, logPath) => {
+      await opencodeRun({ cwd: process.cwd(), background: false, prompt: "no model probe" });
+      return probedConfig(logPath);
+    });
+
+    expect(probed).toBe(false);
+  });
+
+  test("a submit with an explicit model probes so the override can be named", async () => {
+    const probed = await withRecordingCli(async (_bin, logPath) => {
+      await opencodeRun({
+        cwd: process.cwd(),
+        background: false,
+        prompt: "explicit model probe",
+        model: "deepseek/deepseek-v4"
+      });
+      return probedConfig(logPath);
+    });
+
+    expect(probed).toBe(true);
+  });
+
+  test("opencode_transfer probes unconditionally because it needs a name, not a comparison", async () => {
+    // The imported session file has to carry a model, so this path reads the
+    // configured default even when the caller requested nothing. docs/development.md
+    // says so; it used to claim the probe ran on explicit models only.
+    const probed = await withRecordingCli(async (_bin, logPath) => {
+      await opencodeTransfer({
+        cwd: process.cwd(),
+        rolloutFile: join(process.cwd(), "test/fixtures/codex-rollout-current-visible.jsonl")
+      });
+      return probedConfig(logPath);
+    });
+
+    expect(probed).toBe(true);
   });
 });

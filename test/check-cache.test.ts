@@ -19,6 +19,7 @@ afterEach(() => {
 
 type CheckResult = {
   ok: boolean;
+  error?: { code: string; retryable: boolean };
   warnings: string[];
   version?: string;
   agents?: string[];
@@ -38,6 +39,17 @@ const ID_FIRST_PROVIDER_LISTING = [
   "  console.log('  deepseek  DeepSeek');"
 ];
 
+/**
+ * Fails the first `providers list` and answers normally afterwards — the shape of a
+ * transient CLI hiccup (a provider file being rewritten, a cold auth store).
+ */
+const FLAKY_PROVIDER_LISTING = [
+  "  const seen = readFileSync(process.env.FAKE_CHECK_COUNTS, 'utf8').split('\\n').filter((line) => line.startsWith('providers'));",
+  "  if (seen.length === 1) { console.error('Provider not found: AIHubMix'); process.exit(1); }",
+  "  console.log('  aihubmix  AIHubMix gateway');",
+  "  console.log('  deepseek  DeepSeek');"
+];
+
 async function withCountingCli<T>(
   run: (context: { counts: string }) => Promise<T>,
   providerListing: string[] = ID_FIRST_PROVIDER_LISTING
@@ -53,7 +65,7 @@ async function withCountingCli<T>(
       bin,
       [
         "#!/usr/bin/env node",
-        "import { appendFileSync } from 'node:fs';",
+        "import { appendFileSync, readFileSync } from 'node:fs';",
         "appendFileSync(process.env.FAKE_CHECK_COUNTS, process.argv.slice(2).join(' ') + '\\n');",
         "if (process.argv[2] === '--version') { console.log('1.18.16'); process.exit(0); }",
         "if (process.argv[2] === 'debug') { console.log(JSON.stringify({ model: 'aihubmix/x' })); process.exit(0); }",
@@ -152,6 +164,34 @@ describe("opencode_check caching", () => {
       const invocations = (await readFile(counts, "utf8")).split("\n").filter(Boolean);
       expect(invocations.filter((line) => line.startsWith("providers"))).toHaveLength(2);
     });
+  });
+
+  test("re-runs a listing that failed instead of answering from the failure", async () => {
+    await withCountingCli(async ({ counts }) => {
+      const failed = readEnvelope<CheckResult>(await opencodeCheck({ cwd: process.cwd() }));
+
+      expect(failed.ok).toBe(false);
+      expect(failed.error?.code).toBe("provider_listing_failed");
+      // retryable:true is a promise to the caller: a plain retry has to be able to
+      // succeed. Memoising the failure turned that retry into the same answer for
+      // the life of the MCP server process, recoverable only with force:true.
+      expect(failed.error?.retryable).toBe(true);
+
+      const retried = readEnvelope<CheckResult>(await opencodeCheck({ cwd: process.cwd() }));
+
+      expect(retried.ok).toBe(true);
+      expect(retried.cache?.providersCacheHit).toBe(false);
+      expect(retried.providerIds).toEqual(["aihubmix", "deepseek"]);
+
+      const invocations = (await readFile(counts, "utf8")).split("\n").filter(Boolean);
+      expect(invocations.filter((line) => line.startsWith("providers"))).toHaveLength(2);
+
+      // And the success that followed is still cached, so the fix does not undo OX6.
+      const third = readEnvelope<CheckResult>(await opencodeCheck({ cwd: process.cwd() }));
+      expect(third.cache?.providersCacheHit).toBe(true);
+      const afterThird = (await readFile(counts, "utf8")).split("\n").filter(Boolean);
+      expect(afterThird.filter((line) => line.startsWith("providers"))).toHaveLength(2);
+    }, FLAKY_PROVIDER_LISTING);
   });
 
   test("reports the agent list and any proxy the CLI will inherit", async () => {

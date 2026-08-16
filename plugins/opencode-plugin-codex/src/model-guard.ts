@@ -85,9 +85,11 @@ export type EffectiveModelProbe = {
 const PROBE_TIMEOUT_MS = 10_000;
 
 /**
- * One probe per binary and directory for the life of the MCP server process.
- * `opencode_check` alone was called 471 times in two months, once 124 times in a
- * single day, and the resolved configuration does not change under us mid-session.
+ * One successful probe per binary and directory for the life of the MCP server
+ * process. `opencode_check` alone was called 471 times in two months, once 124 times
+ * in a single day, and the resolved configuration does not change under us
+ * mid-session. Failures are never remembered: they are transient by nature, and a
+ * memoised one would answer every later call in this process.
  */
 const probeCache = new Map<string, EffectiveModelProbe>();
 const MAX_PROBE_CACHE_ENTRIES = 32;
@@ -149,8 +151,16 @@ export async function probeEffectiveModel(options: {
     };
   }
 
-  if (probeCache.size >= MAX_PROBE_CACHE_ENTRIES) probeCache.clear();
-  probeCache.set(key, probe);
+  // Only a probe that actually read the configuration is remembered. `probe.config`
+  // is set on exactly one path — exit 0 with parseable JSON — so a non-zero exit, an
+  // unparseable stdout or a spawn failure is re-probed on the next call instead of
+  // being frozen in for the life of the server process. A memoised failure here made
+  // every later opencode_transfer without an explicit model refuse with
+  // opencode_model_required, because transfer reads only the cached configured root.
+  if (probe.config) {
+    if (probeCache.size >= MAX_PROBE_CACHE_ENTRIES) probeCache.clear();
+    probeCache.set(key, probe);
+  }
   return probe;
 }
 

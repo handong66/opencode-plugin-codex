@@ -111,8 +111,16 @@ async function cachedListing(
     raw: stripAnsi(raw),
     cachedAt: new Date().toISOString()
   };
-  if (cache.size >= MAX_CACHE_ENTRIES) cache.clear();
-  cache.set(key, listing);
+  // Only successes are remembered — the same rule the discovery memo already
+  // states. A memoised failure is not a cached answer, it is a stuck one: one
+  // transient non-zero `providers list` used to make every later opencode_check in
+  // this server process return provider_listing_failed with retryable:true, so the
+  // caller's retry landed straight back in the memo until it passed force:true or
+  // the process restarted.
+  if (result.exitCode === 0) {
+    if (cache.size >= MAX_CACHE_ENTRIES) cache.clear();
+    cache.set(key, listing);
+  }
   return { ...listing, cacheHit: false };
 }
 

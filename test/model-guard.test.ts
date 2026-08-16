@@ -106,6 +106,33 @@ describe("probeEffectiveModel", () => {
     });
   });
 
+  test("re-probes after a failed probe instead of remembering the failure", async () => {
+    // One `opencode debug config` that exits non-zero used to answer every later
+    // probe in this MCP server process, and opencode_transfer reads only the cached
+    // configured root model — so every later transfer without an explicit model
+    // refused with opencode_model_required until the server restarted.
+    await withFakeConfigCli(
+      [
+        "if (process.argv[2] === 'debug' && process.argv[3] === 'config') {",
+        "  const fs = await import('node:fs');",
+        "  const marker = process.argv[1] + '.probed';",
+        "  if (!fs.existsSync(marker)) { fs.writeFileSync(marker, 'x'); console.error('config store busy'); process.exit(1); }",
+        "  console.log(JSON.stringify({ model: 'aihubmix/claude-opus-4-6' }));",
+        "  process.exit(0);",
+        "}"
+      ].join("\n"),
+      async (bin) => {
+        const failed = await probeEffectiveModel({ opencodeBin: bin, cwd: process.cwd() });
+        expect(failed.config).toBeUndefined();
+        expect(failed.warnings.join(" ")).toContain("opencode debug config exited 1");
+
+        const retried = await probeEffectiveModel({ opencodeBin: bin, cwd: process.cwd() });
+        expect(retried.config?.model).toBe("aihubmix/claude-opus-4-6");
+        expect(retried.warnings).toEqual([]);
+      }
+    );
+  });
+
   test("a CLI without `debug config` degrades to a warning, not a failure", async () => {
     await withFakeConfigCli(
       "if (process.argv[2] === 'debug') { console.error('unknown command'); process.exit(1); }",

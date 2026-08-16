@@ -96,6 +96,8 @@ Results are cached per binary and directory for the life of the MCP server proce
 
 There is no `cacheTtlMs`, on purpose. What invalidates this answer is a user installing a CLI or editing a config file, which no interval predicts; publishing a TTL the plugin does not enforce would be a false promise.
 
+Only successful answers are remembered — the rule `discoverOpenCode` already followed. A listing that exits non-zero and a `debug config` probe that could not read the configuration are re-run on the next call, because a memoised failure is not a cached answer but a stuck one: `provider_listing_failed` is returned with `retryable: true`, so a caller's retry has to be able to reach the CLI again rather than land back in the memo, and a stuck `debug config` would make every later `opencode_transfer` without an explicit model refuse with `opencode_model_required`. `force: true` remains an extra invalidation, not the only recovery.
+
 Listings are parsed into arrays with ANSI escapes stripped by `src/ansi.ts`, and a listing that exits non-zero is `ok: false` with `provider_listing_failed` instead of a `Provider not found` message wrapped inside a success.
 
 `providers list` is a banner of **display names** in OpenCode 1.18.16 (`● AIHubMix api`), while the provider id is `aihubmix`. `parseListOutput` therefore claims a token as an id only when it already looks like one — lowercase and letter-initial — and reports `providerIds: []` plus a warning when a listing yields no ids at all, rather than passing display names off as ids. Reading the name as an id is not a cosmetic error: the spelling guard below would then refuse the id that works.

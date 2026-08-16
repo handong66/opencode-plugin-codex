@@ -5,6 +5,52 @@ import {
 } from "./opencode-cli.js";
 import { summarizeOpenCodeOutput, type JobRecord } from "./job-store.js";
 
+/**
+ * What the worker sends OpenCode when the tool-call ceiling is reached.
+ *
+ * The ceiling exists because wall-clock was the only knob: 86 timed-out job logs
+ * hold 1,360 tool calls (median 13, p90 37, max 81) against 202 text events, and one
+ * job made 53 tool calls and produced no text at all. Killing such a run throws the
+ * work away, so we ask for the answer instead.
+ */
+export const FINAL_ANSWER_PROMPT =
+  "You have reached the tool-call budget for this delegation. Stop investigating and produce your final answer now " +
+  "from what you have already gathered. Do not make any further tool calls. State explicitly what you did not get to inspect.";
+
+/**
+ * Turn the original argv into a continuation of the same OpenCode session.
+ * `--fork` is dropped: the point is to finish this session, not to branch it.
+ */
+export function buildFinalAnswerArgs(args: string[], sessionId: string): string[] {
+  const next: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--fork") continue;
+    if (arg === "--session") {
+      index += 1;
+      continue;
+    }
+    next.push(arg);
+  }
+  next.push("--session", sessionId);
+  return next;
+}
+
+/** Count OpenCode tool calls in a completed JSONL line, and pick up the session id. */
+export function readStreamProgress(line: string): { toolCalls: number; sessionId?: string } {
+  if (!line.trim()) return { toolCalls: 0 };
+  let event: unknown;
+  try {
+    event = JSON.parse(line);
+  } catch {
+    return { toolCalls: 0 };
+  }
+  if (!event || typeof event !== "object") return { toolCalls: 0 };
+  const typedEvent = event as { type?: string; sessionID?: string; part?: { type?: string } };
+  const isToolCall = typedEvent.type === "tool_use" || typedEvent.part?.type === "tool";
+  return { toolCalls: isToolCall ? 1 : 0, sessionId: typedEvent.sessionID };
+}
+
 export type JobOutcome = {
   exitCode: number | null;
   signal: NodeJS.Signals | null;

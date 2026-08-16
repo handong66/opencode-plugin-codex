@@ -68,6 +68,23 @@ const commonShape = {
 const jobIdSchema = z.string().regex(/^job_[A-Za-z0-9_-]{1,128}$/);
 
 /**
+ * Wall-clock was the only budget: 86 timed-out job logs hold 1,360 tool calls
+ * (median 13, p90 37, max 81) against 202 text events, and one job made 53 tool
+ * calls and produced no text at all. Reaching this ceiling does not kill the job.
+ */
+const maxToolCallsSchema = z
+  .number()
+  .int()
+  .min(1)
+  .max(500)
+  .optional()
+  .describe(
+    "Optional ceiling on OpenCode tool calls (1..500). On reaching it the background worker does not kill the job: " +
+      "it asks the same OpenCode session to produce its final answer from what it already gathered. " +
+      "Successful jobs make a median of 5 tool calls; timed-out jobs a median of 13. Enforced only when background is true."
+  );
+
+/**
  * Exposed on run/continue/rescue. Not exposed on the two review tools: their prompts
  * end with "Stay read-only" while OpenCode's own `--auto` also approves writes, so a
  * review that needs wider access has to become an explicit opencode_run.
@@ -116,6 +133,7 @@ server.registerTool(
       title: z.string().min(1).max(1_024).optional(),
       background: z.boolean().optional(),
       timeoutMs: timeoutSchema,
+      maxToolCalls: maxToolCallsSchema,
       autoApprovePermissions: autoApprovePermissionsSchema,
       allowCodexPrivatePaths: z.boolean().optional().describe("Allow prompt references to Codex private runtime paths. Does not change OpenCode permission handling."),
       dangerouslySkipPermissions: z.boolean().optional().describe("Deprecated compatibility alias for autoApprovePermissions. Does not allow Codex private paths.")
@@ -152,6 +170,7 @@ server.registerTool(
       problem: z.string().min(1).max(250_000),
       background: z.boolean().optional(),
       timeoutMs: timeoutSchema,
+      maxToolCalls: maxToolCallsSchema,
       autoApprovePermissions: autoApprovePermissionsSchema
     }
   },
@@ -167,7 +186,8 @@ server.registerTool(
       ...commonShape,
       target: z.string().min(1).max(16_384).optional(),
       background: z.boolean().optional(),
-      timeoutMs: timeoutSchema
+      timeoutMs: timeoutSchema,
+      maxToolCalls: maxToolCallsSchema
     }
   },
   (args, extra) => opencodeReview(withCodexWorkspaceRoots(args, extra._meta))
@@ -182,7 +202,8 @@ server.registerTool(
       ...commonShape,
       target: z.string().min(1).max(16_384).optional(),
       background: z.boolean().optional(),
-      timeoutMs: timeoutSchema
+      timeoutMs: timeoutSchema,
+      maxToolCalls: maxToolCallsSchema
     }
   },
   (args, extra) => opencodeAdversarialReview(withCodexWorkspaceRoots(args, extra._meta))

@@ -38,6 +38,13 @@ export type JobRecord = {
   startedAt?: string;
   finishedAt?: string;
   timeoutMs: number;
+  /**
+   * Optional ceiling on tool calls. Reaching it does not kill the job: the worker
+   * asks OpenCode for its final answer from what it already gathered.
+   */
+  maxToolCalls?: number;
+  /** True when that ceiling was reached and the final-answer pass ran. */
+  toolBudgetReached?: boolean;
   exitCode?: number | null;
   signal?: NodeJS.Signals | null;
   errorClass?: string;
@@ -556,6 +563,7 @@ export class JobStore {
     args: string[];
     prompt: string;
     timeoutMs?: number;
+    maxToolCalls?: number;
     opencodeBin?: string;
     opencodeSessionId?: string;
   }): Promise<JobRecord> {
@@ -579,6 +587,7 @@ export class JobStore {
       opencodeSessionId: params.opencodeSessionId,
       createdAt: new Date().toISOString(),
       timeoutMs: params.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      maxToolCalls: params.maxToolCalls,
       stdoutPath: this.stdoutPath(id),
       stderrPath: this.stderrPath(id)
     };

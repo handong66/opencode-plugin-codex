@@ -2,10 +2,19 @@
 import { chmod, readFile, rm, writeFile } from "node:fs/promises";
 import { spawn, type ChildProcess } from "node:child_process";
 import { sanitizeOpenCodeEnv } from "./opencode-cli.js";
-import { finalizeJobRecord } from "./job-finalize.js";
+import {
+  buildFinalAnswerArgs,
+  finalizeJobRecord,
+  readStreamProgress,
+  FINAL_ANSWER_PROMPT
+} from "./job-finalize.js";
 import { JobStore, type JobRecord } from "./job-store.js";
 
 const MAX_CAPTURE_CHARS = 1_000_000;
+
+/** Ceiling on the extra pass that asks for the final answer. */
+const FINAL_ANSWER_MAX_MS = 120_000;
+const FINAL_ANSWER_MIN_MS = 30_000;
 
 function appendTail(current: string, chunk: string): { value: string; truncated: boolean } {
   const combined = current + chunk;
@@ -37,6 +46,51 @@ async function writeLog(path: string, value: string): Promise<void> {
   await chmod(path, 0o600);
 }
 
+/**
+ * Ask OpenCode to finish, in the session it is already holding.
+ *
+ * This is the alternative to SIGTERM when a run walks past its tool-call ceiling:
+ * killing it discards everything it read, while the session still has all of it.
+ */
+async function runFinalAnswerPass(params: {
+  record: JobRecord;
+  sessionId: string;
+  timeoutMs: number;
+  onStdout: (chunk: string) => void;
+  onStderr: (chunk: string) => void;
+  /** Hands the new child to the caller so an opencode_cancel still reaches it. */
+  register: (child: ChildProcess) => void;
+}): Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }> {
+  return await new Promise((resolve) => {
+    const child = spawn(params.record.command, buildFinalAnswerArgs(params.record.args, params.sessionId), {
+      cwd: params.record.cwd,
+      detached: process.platform !== "win32",
+      stdio: ["pipe", "pipe", "pipe"],
+      env: sanitizeOpenCodeEnv()
+    });
+    params.register(child);
+    let settled = false;
+    const finish = (value: { exitCode: number | null; signal: NodeJS.Signals | null }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve(value);
+    };
+    const timeout = setTimeout(() => {
+      signalTree(child, "SIGTERM");
+      setTimeout(() => signalTree(child, "SIGKILL"), 2_000).unref();
+    }, params.timeoutMs);
+    timeout.unref();
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => params.onStdout(chunk));
+    child.stderr?.on("data", (chunk: string) => params.onStderr(chunk));
+    child.on("error", () => finish({ exitCode: null, signal: null }));
+    child.on("close", (exitCode, signal) => finish({ exitCode, signal }));
+    child.stdin?.end(FINAL_ANSWER_PROMPT);
+  });
+}
+
 async function main(): Promise<void> {
   const jobId = process.argv[2];
   if (!jobId) throw new Error("Missing background job ID.");
@@ -53,6 +107,10 @@ async function main(): Promise<void> {
   let outputTruncated = false;
   let timedOut = false;
   let cancelRequested = false;
+  let toolCallCount = 0;
+  let streamSessionId: string | undefined = record.opencodeSessionId;
+  let pendingLine = "";
+  let toolBudgetReached = false;
   let forceKillTimer: NodeJS.Timeout | undefined;
   let flushTimer: NodeJS.Timeout | undefined;
   let flushChain = Promise.resolve();
@@ -134,10 +192,33 @@ async function main(): Promise<void> {
     });
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
+    const requestFinalAnswer = () => {
+      if (toolBudgetReached) return;
+      toolBudgetReached = true;
+      // Not SIGKILL and not a failure: end this pass, then ask the same session for
+      // its answer. The alternative — killing the run — discards everything it read.
+      signalTree(child, "SIGTERM");
+      forceKillTimer ??= setTimeout(() => signalTree(child, "SIGKILL"), 2_000);
+      forceKillTimer.unref();
+    };
+    /** Count tool calls on complete lines only; a half-written line cannot be parsed. */
+    const trackProgress = (chunk: string) => {
+      if (!record.maxToolCalls) return;
+      pendingLine += chunk;
+      const lines = pendingLine.split(/\r?\n/);
+      pendingLine = lines.pop() ?? "";
+      for (const line of lines) {
+        const progress = readStreamProgress(line);
+        toolCallCount += progress.toolCalls;
+        streamSessionId ??= progress.sessionId;
+      }
+      if (toolCallCount >= record.maxToolCalls && streamSessionId) requestFinalAnswer();
+    };
     child.stdout?.on("data", (chunk: string) => {
       const appended = appendTail(stdout, chunk);
       stdout = appended.value;
       outputTruncated ||= appended.truncated;
+      trackProgress(chunk);
       scheduleFlush();
     });
     child.stderr?.on("data", (chunk: string) => {
@@ -158,14 +239,44 @@ async function main(): Promise<void> {
     }, record.timeoutMs);
     timeout.unref();
 
-    const [outcome, stdinError] = await Promise.all([outcomePromise, stdinOutcomePromise]);
+    let [outcome, stdinError] = await Promise.all([outcomePromise, stdinOutcomePromise]);
     clearTimeout(timeout);
     if (forceKillTimer) clearTimeout(forceKillTimer);
+    forceKillTimer = undefined;
+
+    if (toolBudgetReached && streamSessionId && !cancelRequested && !timedOut) {
+      const elapsedMs = Date.now() - Date.parse(record.startedAt ?? record.createdAt);
+      const remainingMs = record.timeoutMs - elapsedMs;
+      const finalAnswer = await runFinalAnswerPass({
+        record,
+        sessionId: streamSessionId,
+        timeoutMs: Math.max(Math.min(remainingMs, FINAL_ANSWER_MAX_MS), FINAL_ANSWER_MIN_MS),
+        onStdout: (chunk) => {
+          const appended = appendTail(stdout, chunk);
+          stdout = appended.value;
+          outputTruncated ||= appended.truncated;
+          scheduleFlush();
+        },
+        onStderr: (chunk) => {
+          const appended = appendTail(stderr, chunk);
+          stderr = appended.value;
+          outputTruncated ||= appended.truncated;
+          scheduleFlush();
+        },
+        register: (nextChild) => {
+          child = nextChild;
+          if (cancelRequested) signalTree(child, "SIGTERM");
+        }
+      });
+      // The interrupted first pass is not the job's outcome; the answer pass is.
+      outcome = finalAnswer;
+      stdinError = undefined;
+    }
 
     if (flushTimer) clearTimeout(flushTimer);
     await flushLogs();
     const latest = finalizeJobRecord({
-      record: await store.read(jobId),
+      record: { ...(await store.read(jobId)), toolBudgetReached: toolBudgetReached || undefined },
       stdout,
       stderr,
       outcome,

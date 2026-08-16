@@ -73,6 +73,16 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 
 ### Added
 
+- **OX1** `maxToolCalls` on `opencode_run`, `opencode_rescue`, `opencode_review` and
+  `opencode_adversarial_review`. Wall-clock used to be the only knob, and 86 timed-out
+  job logs hold 1,360 tool calls (median 13, p90 37, max 81) against 202 text events —
+  one job made 53 tool calls and produced no text at all. Reaching the ceiling does not
+  SIGTERM the job: the worker ends that pass and asks the same OpenCode session to
+  produce its final answer from what it already gathered, then reports
+  `toolBudgetReached: true` on the record. Enforced by the background worker only; a
+  `background:false` call reports the ignored ceiling in `warnings[]`.
+- **OX1** Both review prompts now carry a hard file budget ("do not open more than 20
+  files; say which subset you reviewed and which you skipped").
 - **X2/X1** `outputSummary` now reports what the run actually did: `toolCallCount`,
   `filesInspected` (distinct paths), `turnsUsed`, `skillsLoaded[]`, the derived
   `evidenceLevel` (`none` | `thin` | `substantive`), and `warnings[]`.

@@ -9,6 +9,10 @@ Use the bundled `opencode_*` tools. Plugin source and tests define machine behav
 
 Read results from MCP `structuredContent`. The text copy is compact, and a payload above 8192 characters is not duplicated there at all: it becomes a one-line `structuredContentOnly` notice with the payload size.
 
+Every tool returns one envelope: `{ ok, error?: { code, message, retryable, details? }, warnings: string[], data }`. The payload is in `data` — `job`, `record`, `stdout`, `stderr`, `outputSummary`, `workspace`, `effectiveModel`, `continuation`. Small scalars (`terminal`, `nextAction`, `waited`, `resumable`, `openCodeSessionId`, `errorClass`, `exitCode`, `maxChars`, `maxCharsClamped`, `view`, `modelSelection`, `background`, `importSucceeded`) are mirrored at the top level for the 0.2 transition; bulk fields are not.
+
+A boundary refusal is returned, not thrown: `workspace_unavailable`, `workspace_out_of_bounds` (which lists the roots that are available), `file_attachment_invalid`, `private_path_blocked`, `rollout_invalid`, `state_write_failed`, `cli_not_found`, `cli_probe_timeout`. All are `retryable: false` except `cli_probe_timeout`. Never work around one by calling the OpenCode CLI directly.
+
 ## Choose a tool
 
 - Diagnose availability with `opencode_check`.

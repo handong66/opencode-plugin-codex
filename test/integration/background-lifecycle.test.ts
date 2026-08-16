@@ -36,7 +36,10 @@ async function call(client: Client, name: string, args: Record<string, unknown>)
   if (result.isError) throw new Error(`${name} failed: ${JSON.stringify(result)}`);
   // structuredContent, not the text: payloads over 8KB are no longer duplicated.
   if (!result.structuredContent) throw new Error(`${name} returned no structured content.`);
-  return result.structuredContent as Record<string, any>;
+  // The 0.2 envelope keeps meta at the top level and the payload in `data`; merge
+  // them so a caller reads one flat object.
+  const envelope = result.structuredContent as Record<string, any>;
+  return { ...(envelope.data ?? {}), ...envelope } as Record<string, any>;
 }
 
 afterEach(async () => {

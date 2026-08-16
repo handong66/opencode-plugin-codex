@@ -17,16 +17,23 @@ export type BoundaryErrorCode =
   | "file_attachment_invalid"
   | "private_path_blocked"
   | "rollout_invalid"
-  | "state_write_failed";
+  | "state_write_failed"
+  | "cli_not_found"
+  | "cli_probe_timeout";
 
-/** None of these succeed on a retry of the same call; each needs a different input. */
+/**
+ * Retrying the same call unchanged: only a probe timeout can plausibly succeed
+ * later (a cold binary that answered slowly once may answer in time next call).
+ */
 const BOUNDARY_RETRYABLE: Record<BoundaryErrorCode, boolean> = {
   workspace_unavailable: false,
   workspace_out_of_bounds: false,
   file_attachment_invalid: false,
   private_path_blocked: false,
   rollout_invalid: false,
-  state_write_failed: false
+  state_write_failed: false,
+  cli_not_found: false,
+  cli_probe_timeout: true
 };
 
 export class BoundaryError extends Error {

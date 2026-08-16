@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { JobStore, summarizeOpenCodeOutput, type JobRecord } from "../plugins/opencode-plugin-codex/src/job-store.js";
 import { opencodeResult } from "../plugins/opencode-plugin-codex/src/tools.js";
+import { readEnvelope } from "./helpers/envelope.js";
 
 function record(overrides: Partial<JobRecord> = {}): JobRecord {
   return {
@@ -120,11 +121,11 @@ describe("opencode_result view", () => {
   test("keeps the raw tail by default", async () => {
     const answer = "Findings: the default view is unchanged.";
     await withStoredJob(stopStream([answer]), async ({ jobId }) => {
-      const parsed = (await opencodeResult({ jobId })).structuredContent as {
+      const parsed = readEnvelope<{
         view?: string;
         stdout?: string;
         outputSummary?: { finalText?: string };
-      };
+      }>(await opencodeResult({ jobId }));
 
       expect(parsed.view).toBe("raw");
       expect(parsed.stdout).toContain("step_finish");
@@ -135,13 +136,13 @@ describe("opencode_result view", () => {
   test("drops the raw tails on request and keeps the answer", async () => {
     const answer = "Findings: the final view carries the answer.";
     await withStoredJob(stopStream([answer]), async ({ jobId }) => {
-      const parsed = (await opencodeResult({ jobId, view: "final" })).structuredContent as {
+      const parsed = readEnvelope<{
         view?: string;
         stdout?: string;
         stderr?: string;
         rawOmitted?: boolean;
         outputSummary?: { finalText?: string };
-      };
+      }>(await opencodeResult({ jobId, view: "final" }));
 
       expect(parsed.view).toBe("final");
       expect(parsed.rawOmitted).toBe(true);

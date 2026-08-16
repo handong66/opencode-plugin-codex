@@ -2,7 +2,8 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { BoundaryError, isBoundaryError, stateWriteFailed } from "../plugins/opencode-plugin-codex/src/boundary.js";
+import { isBoundaryError, stateWriteFailed } from "../plugins/opencode-plugin-codex/src/boundary.js";
+import { readEnvelope, type ToolErrorShape } from "./helpers/envelope.js";
 import { JobStore } from "../plugins/opencode-plugin-codex/src/job-store.js";
 import {
   configureWorkspaceRootsProvider,
@@ -50,14 +51,23 @@ async function withFakeOpenCode<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-async function boundaryOf(run: () => Promise<unknown>): Promise<BoundaryError> {
+/**
+ * A tool refusal is a returned envelope; a direct JobStore call still throws, since
+ * it is below the MCP surface. Both carry the same code and `retryable`.
+ */
+async function boundaryOf(run: () => Promise<unknown>): Promise<ToolErrorShape> {
+  let value: unknown;
   try {
-    await run();
+    value = await run();
   } catch (error) {
-    if (isBoundaryError(error)) return error;
+    if (isBoundaryError(error)) {
+      return { code: error.code, message: error.message, retryable: error.retryable, details: error.details };
+    }
     throw error;
   }
-  throw new Error("Expected a BoundaryError.");
+  const envelope = (value as { structuredContent?: { ok?: boolean; error?: ToolErrorShape } })?.structuredContent;
+  if (envelope?.ok === false && envelope.error) return envelope.error;
+  throw new Error(`Expected a boundary refusal, got ${JSON.stringify(value).slice(0, 300)}`);
 }
 
 describe("workspace boundary refusals carry a code and the roots", () => {
@@ -91,14 +101,14 @@ describe("workspace boundary refusals carry a code and the roots", () => {
 describe("opencode_check degrades instead of failing whole", () => {
   test("reports CLI and effective-model diagnostics with no workspace root", async () => {
     await withFakeOpenCode(async () => {
-      const response = (await withRoots([], () => opencodeCheck({}))).structuredContent as {
+      const response = readEnvelope<{
         ok: boolean;
         version?: string;
         workspace: { ok: boolean; error?: { code: string; retryable: boolean } };
         effectiveModel?: { model?: string };
         providersRaw?: string;
         warnings: string[];
-      };
+      }>(await withRoots([], () => opencodeCheck({})));
 
       // Four recorded missing-root refusals hid the CLI diagnostics behind a bare
       // exception — exactly when the caller was most tempted to bypass the plugin.
@@ -115,9 +125,9 @@ describe("opencode_check degrades instead of failing whole", () => {
 
   test("reports the resolved workspace when a root is available", async () => {
     await withFakeOpenCode(async () => {
-      const response = (await withRoots([process.cwd()], () => opencodeCheck({}))).structuredContent as {
-        workspace: { ok: boolean; cwd?: string };
-      };
+      const response = readEnvelope<{ workspace: { ok: boolean; cwd?: string } }>(
+        await withRoots([process.cwd()], () => opencodeCheck({}))
+      );
 
       expect(response.workspace.ok).toBe(true);
       expect(response.workspace.cwd).toBe(process.cwd());

@@ -44,7 +44,10 @@ client.setRequestHandler(ListRootsRequestSchema, async () => ({
  */
 function structured(name, result) {
   if (!result.structuredContent) throw new Error(`${name} returned no structuredContent: ${JSON.stringify(result)}`);
-  return result.structuredContent;
+  // The 0.2 envelope keeps meta (`ok`, `error`, `warnings`) at the top level and the
+  // payload in `data`; merge them so this script reads one flat object.
+  const envelope = result.structuredContent;
+  return { ...(envelope.data ?? {}), ...envelope };
 }
 
 try {

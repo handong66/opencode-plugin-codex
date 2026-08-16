@@ -5,6 +5,7 @@ import {
   classifyOpenCodeFailure,
   detectOpenCodeJsonlError,
   discoverOpenCode,
+  discoveryFailure,
   isRetryableOpenCodeFailure,
   openCodeFailureMessage,
   runOpenCode,
@@ -126,6 +127,103 @@ function jsonText(value: unknown) {
             "Read it there; it is deliberately not duplicated as text."
         });
   return { content: [{ type: "text" as const, text }], structuredContent };
+}
+
+export type ToolError = {
+  code: string;
+  message: string;
+  retryable: boolean;
+  details?: unknown;
+};
+
+/**
+ * Legacy top-level fields kept alongside `data` for the 0.2 transition.
+ *
+ * Only cheap scalars are mirrored. The bulk fields (`job`, `record`, `stdout`,
+ * `stderr`, `outputSummary`, `providersRaw`, …) live in `data` and nowhere else:
+ * duplicating them would undo OX2, which removed 195,000,000 characters of
+ * duplicate payload from the caller's context.
+ */
+const LEGACY_TOP_LEVEL_MIRRORS = new Set([
+  "background",
+  "terminal",
+  "nextAction",
+  "waited",
+  "resumable",
+  "openCodeSessionId",
+  "opencodeSessionId",
+  "errorClass",
+  "exitCode",
+  "bin",
+  "version",
+  "opencodeBin",
+  "stdoutTruncated",
+  "stderrTruncated",
+  "maxChars",
+  "maxCharsClamped",
+  "view",
+  "rawOmitted",
+  "modelSelection",
+  "importSucceeded",
+  "continuationStarted",
+  "continuationResultComplete"
+]);
+
+/**
+ * The one response shape.
+ *
+ * There used to be four (background submit, foreground result, status, result),
+ * only `opencode_transfer` ever emitted `{code,message}`, and boundary failures
+ * were bare exceptions — which is how 9,892 events carried one error code between
+ * them. `ok` is the outcome, `error` is typed and says whether a retry can work,
+ * `warnings` is always an array, and `data` is the payload.
+ */
+function envelope(params: {
+  ok: boolean;
+  data?: Record<string, unknown>;
+  error?: ToolError;
+  warnings?: string[];
+}) {
+  const mirrors: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(params.data ?? {})) {
+    if (LEGACY_TOP_LEVEL_MIRRORS.has(key) && value !== undefined) mirrors[key] = value;
+  }
+  return jsonText({
+    ok: params.ok,
+    ...(params.error ? { error: params.error } : {}),
+    warnings: params.warnings ?? [],
+    ...mirrors,
+    ...(params.data ? { data: params.data } : {})
+  });
+}
+
+/** Turn a typed boundary refusal into the same envelope every other failure uses. */
+function boundaryEnvelope(error: BoundaryError) {
+  return envelope({
+    ok: false,
+    error: {
+      code: error.code,
+      message: error.message,
+      retryable: error.retryable,
+      ...(error.details ? { details: error.details } : {})
+    },
+    warnings: []
+  });
+}
+
+/**
+ * Boundary refusals are returned, not thrown. An MCP exception carries no code, no
+ * `retryable`, and no structure a caller can branch on.
+ */
+async function guarded<T extends { structuredContent: Record<string, unknown> }>(
+  run: () => Promise<T>
+): Promise<T | ReturnType<typeof boundaryEnvelope>> {
+  try {
+    return await run();
+  } catch (error) {
+    if (isBoundaryError(error)) return boundaryEnvelope(error);
+    throw error;
+  }
 }
 
 function buildRunArgs(params: {
@@ -356,11 +454,9 @@ async function runOrStartJob(params: {
       opencodeSessionId: params.sessionId,
       modelSelection: selection.modelSelection
     });
-    return jsonText({
+    return envelope({
       ok: true,
-      background: true,
-      job,
-      modelSelection: selection.modelSelection,
+      data: { background: true, job, modelSelection: selection.modelSelection },
       warnings
     });
   }
@@ -403,17 +499,29 @@ async function runOrStartJob(params: {
   // crosses the wire is bounded.
   const stdoutTail = result.stdout.slice(-FOREGROUND_TAIL_CHARS);
   const stderrTail = result.stderr.slice(-FOREGROUND_TAIL_CHARS);
-  return jsonText({
+  const failureClass = processSucceeded ? undefined : (summaryRecord.errorClass ?? "unknown");
+  return envelope({
     ok: processSucceeded,
-    bin: result.bin,
-    exitCode: result.exitCode,
-    stdout: stdoutTail,
-    stderr: stderrTail,
-    stdoutTruncated: result.stdoutTruncated === true || stdoutTail.length < result.stdout.length,
-    stderrTruncated: result.stderrTruncated === true || stderrTail.length < result.stderr.length,
-    errorClass: summaryRecord.errorClass,
-    outputSummary: summarizeOpenCodeOutput(summaryRecord, result.stdout, result.stderr),
-    modelSelection: selection.modelSelection,
+    ...(failureClass
+      ? {
+          error: {
+            code: failureClass,
+            message: structuredError?.message ?? openCodeFailureMessage(failureClass),
+            retryable: isRetryableOpenCodeFailure(failureClass)
+          }
+        }
+      : {}),
+    data: {
+      bin: result.bin,
+      exitCode: result.exitCode,
+      stdout: stdoutTail,
+      stderr: stderrTail,
+      stdoutTruncated: result.stdoutTruncated === true || stdoutTail.length < result.stdout.length,
+      stderrTruncated: result.stderrTruncated === true || stderrTail.length < result.stderr.length,
+      errorClass: summaryRecord.errorClass,
+      outputSummary: summarizeOpenCodeOutput(summaryRecord, result.stdout, result.stderr),
+      modelSelection: selection.modelSelection
+    },
     warnings
   });
 }
@@ -421,17 +529,30 @@ async function runOrStartJob(params: {
 export async function opencodeCheck(
   args: CommonArgs & { provider?: string; includeModels?: boolean; force?: boolean }
 ) {
+  return guarded(() => opencodeCheckImpl(args));
+}
+
+async function opencodeCheckImpl(
+  args: CommonArgs & { provider?: string; includeModels?: boolean; force?: boolean }
+) {
   const discovered = await discoverOpenCode();
   const warnings: string[] = [];
   const data: Record<string, unknown> = {
-    ok: discovered.ok,
     opencodeBin: discovered.bin,
     version: discovered.version,
     tried: discovered.tried,
     errors: discovered.errors
   };
 
-  if (!discovered.ok) return jsonText({ ...data, warnings });
+  if (!discovered.ok) {
+    const failure = discoveryFailure(discovered);
+    return envelope({
+      ok: false,
+      error: { code: failure.code, message: failure.message, retryable: failure.retryable },
+      data,
+      warnings
+    });
+  }
 
   // A missing workspace root used to make the whole diagnostic fail with a bare
   // exception, hiding CLI and model information that has nothing to do with the
@@ -471,7 +592,7 @@ export async function opencodeCheck(
   if (effective.config) data.effectiveModel = effective.config;
   warnings.push(...effective.warnings);
 
-  if (!cwd) return jsonText({ ...data, warnings });
+  if (!cwd) return envelope({ ok: true, data, warnings });
 
   const providers = await runOpenCode(["providers", "list"], {
     cwd,
@@ -501,7 +622,7 @@ export async function opencodeCheck(
     }
   }
 
-  return jsonText({ ...data, warnings });
+  return envelope({ ok: true, data, warnings });
 }
 
 export async function opencodeRun(args: CommonArgs & {
@@ -516,7 +637,7 @@ export async function opencodeRun(args: CommonArgs & {
   allowCodexPrivatePaths?: boolean;
   dangerouslySkipPermissions?: boolean;
 }) {
-  return runOrStartJob({ ...args, kind: "run" });
+  return guarded(() => runOrStartJob({ ...args, kind: "run" }));
 }
 
 export async function opencodeContinue(args: CommonArgs & {
@@ -527,7 +648,7 @@ export async function opencodeContinue(args: CommonArgs & {
   timeoutMs?: number;
   autoApprovePermissions?: boolean;
 }) {
-  return runOrStartJob({ ...args, kind: "continue" });
+  return guarded(() => runOrStartJob({ ...args, kind: "continue" }));
 }
 
 export async function opencodeRescue(args: CommonArgs & {
@@ -544,7 +665,7 @@ export async function opencodeRescue(args: CommonArgs & {
     "",
     args.problem
   ].join("\n");
-  return runOrStartJob({ ...args, kind: "rescue", prompt });
+  return guarded(() => runOrStartJob({ ...args, kind: "rescue", prompt }));
 }
 
 export async function opencodeReview(args: CommonArgs & {
@@ -566,7 +687,7 @@ export async function opencodeReview(args: CommonArgs & {
     "Every finding must cite file:line. A verdict of no findings must be followed by an Inspected list naming the files you actually opened; do not report a conclusion you did not read the code for.",
     "Return Findings first, then Open questions, then Test gaps, then Inspected. Keep it concise. Stay read-only."
   ].join("\n");
-  return runOrStartJob({ ...args, kind: "review", prompt });
+  return guarded(() => runOrStartJob({ ...args, kind: "review", prompt }));
 }
 
 export async function opencodeAdversarialReview(args: CommonArgs & {
@@ -590,10 +711,10 @@ export async function opencodeAdversarialReview(args: CommonArgs & {
     "Every finding must cite file:line. A verdict of no findings must be followed by an Inspected list naming the files you actually opened.",
     "Return Findings (primary first), then Highest-risk assumption, Recommended verification, Inspected, and Scope not inspected. Stay read-only."
   ].join("\n");
-  return runOrStartJob({ ...args, kind: "adversarial_review", prompt });
+  return guarded(() => runOrStartJob({ ...args, kind: "adversarial_review", prompt }));
 }
 
-export async function opencodeTransfer(args: CommonArgs & {
+export type TransferArgs = CommonArgs & {
   threadId?: string;
   rolloutFile?: string;
   title?: string;
@@ -602,18 +723,27 @@ export async function opencodeTransfer(args: CommonArgs & {
   continuePrompt?: string;
   background?: boolean;
   keepTempFile?: boolean;
-}) {
+};
+
+export async function opencodeTransfer(args: TransferArgs) {
+  return guarded(() => opencodeTransferImpl(args));
+}
+
+async function opencodeTransferImpl(args: TransferArgs) {
   const cwd = await cwdOrDefault(args.cwd, args._workspaceRoots);
   const warnings: string[] = [];
   const requestedRolloutFile = args.rolloutFile ?? (await findCodexRolloutFile({ threadId: args.threadId }));
   const rolloutFile = requestedRolloutFile ? await validateRolloutFile(requestedRolloutFile, cwd) : null;
   if (!rolloutFile) {
-    return jsonText({
+    return envelope({
       ok: false,
       error: {
         code: "codex_thread_missing",
-        message: "Could not find a Codex rollout JSONL file. Pass rolloutFile or run from a Codex thread with CODEX_THREAD_ID."
-      }
+        message:
+          "Could not find a Codex rollout JSONL file. Pass rolloutFile or run from a Codex thread with CODEX_THREAD_ID.",
+        retryable: false
+      },
+      warnings
     });
   }
 
@@ -621,36 +751,43 @@ export async function opencodeTransfer(args: CommonArgs & {
     maxMessages: args.maxMessages ?? 64
   });
   if (!transcript.length) {
-    return jsonText({
+    return envelope({
       ok: false,
       error: {
         code: "codex_transcript_empty",
-        message: `No visible user/assistant messages found in ${rolloutFile}.`
-      }
+        message: `No visible user/assistant messages found in ${rolloutFile}.`,
+        retryable: false
+      },
+      warnings
     });
   }
 
   const discovered = await discoverOpenCode();
   if (!discovered.ok || !discovered.bin) {
-    return jsonText({
+    const failure = discoveryFailure(discovered);
+    return envelope({
       ok: false,
       error: {
-        code: "opencode_not_found",
-        message: "OpenCode CLI was not found.",
-        details: discovered
-      }
+        code: failure.code,
+        message: failure.message,
+        retryable: failure.retryable,
+        details: failure.details
+      },
+      warnings
     });
   }
 
   if (!args.model) {
-    return jsonText({
+    return envelope({
       ok: false,
       error: {
         code: "opencode_model_required",
         message:
           "opencode_transfer requires an explicit authorized model. " +
-          "The plugin does not choose a provider/model default because model access is user-specific."
-      }
+          "The plugin does not choose a provider/model default because model access is user-specific.",
+        retryable: false
+      },
+      warnings
     });
   }
 
@@ -680,7 +817,7 @@ export async function opencodeTransfer(args: CommonArgs & {
   }
 
   if (imported.exitCode !== 0 || !match?.[1]) {
-    return jsonText({
+    return envelope({
       ok: false,
       error: {
         code: "opencode_import_failed",
@@ -688,9 +825,11 @@ export async function opencodeTransfer(args: CommonArgs & {
           imported.stderr ||
           imported.stdout ||
           "OpenCode import exited without confirming an imported session ID.",
+        retryable: true,
         details: imported
       },
-      importFile: args.keepTempFile ? importFile : undefined
+      data: { importFile: args.keepTempFile ? importFile : undefined },
+      warnings
     });
   }
   const opencodeSessionId = match[1];
@@ -710,7 +849,7 @@ export async function opencodeTransfer(args: CommonArgs & {
     exportedSessionId === opencodeSessionId ||
     (exported.stdoutTruncated === true && exported.stdout.includes(opencodeSessionId));
   if (exported.exitCode !== 0 || !readbackConfirmed) {
-    return jsonText({
+    return envelope({
       ok: false,
       error: {
         code: "opencode_import_verify_failed",
@@ -718,10 +857,11 @@ export async function opencodeTransfer(args: CommonArgs & {
           exported.stderr ||
           exported.stdout ||
           `OpenCode could not read back imported session ${opencodeSessionId}.`,
+        retryable: true,
         details: exported
       },
-      opencodeSessionId,
-      importFile: args.keepTempFile ? importFile : undefined
+      data: { opencodeSessionId, importFile: args.keepTempFile ? importFile : undefined },
+      warnings
     });
   }
 
@@ -740,31 +880,35 @@ export async function opencodeTransfer(args: CommonArgs & {
     // duplicated into content[0].text.
     const continuation = runResult.structuredContent as {
       ok?: boolean;
-      outputSummary?: { resultComplete?: boolean };
+      data?: { outputSummary?: { resultComplete?: boolean } };
     };
-    return jsonText({
+    return envelope({
       ok: continuation.ok === true,
+      data: {
+        importSucceeded: true,
+        continuationStarted: continuation.ok === true,
+        continuationResultComplete: continuation.data?.outputSummary?.resultComplete === true,
+        opencodeSessionId,
+        importedMessages: transcript.length,
+        source: "codex-jsonl",
+        rolloutFile,
+        model: splitModel(args.model),
+        continuation
+      },
+      warnings
+    });
+  }
+
+  return envelope({
+    ok: true,
+    data: {
       importSucceeded: true,
-      continuationStarted: continuation.ok === true,
-      continuationResultComplete: continuation.outputSummary?.resultComplete === true,
       opencodeSessionId,
       importedMessages: transcript.length,
       source: "codex-jsonl",
       rolloutFile,
-      model: splitModel(args.model),
-      warnings,
-      continuation
-    });
-  }
-
-  return jsonText({
-    ok: true,
-    importSucceeded: true,
-    opencodeSessionId,
-    importedMessages: transcript.length,
-    source: "codex-jsonl",
-    rolloutFile,
-    model: splitModel(args.model),
+      model: splitModel(args.model)
+    },
     warnings
   });
 }
@@ -879,42 +1023,72 @@ async function waitForTerminal(
 }
 
 export async function opencodeStatus(args: { jobId: string; waitMs?: number }) {
+  return guarded(() => opencodeStatusImpl(args));
+}
+
+async function opencodeStatusImpl(args: { jobId: string; waitMs?: number }) {
   const store = new JobStore();
   const { job, waited, warnings: waitWarnings } = await waitForTerminal(store, args.jobId, args.waitMs);
-  const envelope = jobOutcomeEnvelope(job);
+  const outcome = jobOutcomeEnvelope(job);
   // The cheapest and most-called poll must carry the recovery handle; before this
   // a caller had to fetch the full result to learn a timed-out job was resumable.
-  return jsonText({
-    ...envelope,
-    warnings: [...waitWarnings, ...envelope.warnings],
-    job,
-    waited,
-    openCodeSessionId: job.opencodeSessionId,
-    resumable: job.resumable === true
+  return envelope({
+    ok: outcome.ok,
+    error: outcome.error,
+    warnings: [...waitWarnings, ...outcome.warnings],
+    data: {
+      terminal: outcome.terminal,
+      nextAction: outcome.nextAction,
+      job,
+      waited,
+      openCodeSessionId: job.opencodeSessionId,
+      resumable: job.resumable === true
+    }
   });
 }
 
-export async function opencodeResult(args: {
+export type ResultArgs = {
   jobId: string;
   maxChars?: number;
   view?: JobResultView;
   waitMs?: number;
-}) {
+};
+
+export async function opencodeResult(args: ResultArgs) {
+  return guarded(() => opencodeResultImpl(args));
+}
+
+async function opencodeResultImpl(args: ResultArgs) {
   const store = new JobStore();
   const { waited, warnings: waitWarnings } = await waitForTerminal(store, args.jobId, args.waitMs);
   const result = await store.result(args.jobId, args.maxChars, args.view);
-  const envelope = jobOutcomeEnvelope(result.record);
-  return jsonText({
-    ...envelope,
-    ...result,
-    waited,
+  const outcome = jobOutcomeEnvelope(result.record);
+  return envelope({
+    ok: outcome.ok,
+    error: outcome.error,
     // Evidence warnings about the run itself belong next to the polling warnings.
-    warnings: [...waitWarnings, ...envelope.warnings, ...result.outputSummary.warnings]
+    warnings: [...waitWarnings, ...outcome.warnings, ...result.outputSummary.warnings],
+    data: {
+      terminal: outcome.terminal,
+      nextAction: outcome.nextAction,
+      ...result,
+      waited
+    }
   });
 }
 
 export async function opencodeCancel(args: { jobId: string }) {
+  return guarded(() => opencodeCancelImpl(args));
+}
+
+async function opencodeCancelImpl(args: { jobId: string }) {
   const store = new JobStore();
   const job = await store.cancel(args.jobId);
-  return jsonText({ ...jobOutcomeEnvelope(job), job });
+  const outcome = jobOutcomeEnvelope(job);
+  return envelope({
+    ok: outcome.ok,
+    error: outcome.error,
+    warnings: outcome.warnings,
+    data: { terminal: outcome.terminal, nextAction: outcome.nextAction, job }
+  });
 }

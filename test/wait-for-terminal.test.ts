@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { JobStore, type JobRecord } from "../plugins/opencode-plugin-codex/src/job-store.js";
 import { MAX_WAIT_MS, opencodeResult, opencodeStatus } from "../plugins/opencode-plugin-codex/src/tools.js";
+import { readEnvelope } from "./helpers/envelope.js";
 
 type WaitEnvelope = {
   ok: boolean;
@@ -55,7 +56,7 @@ describe("opencode_status waitMs", () => {
   test("returns immediately when waitMs is omitted", async () => {
     await withStore({ id: "job_wait_none" }, async ({ jobId }) => {
       const startedAt = Date.now();
-      const envelope = (await opencodeStatus({ jobId })).structuredContent as WaitEnvelope;
+      const envelope = readEnvelope<WaitEnvelope>(await opencodeStatus({ jobId }));
 
       expect(envelope.terminal).toBe(false);
       expect(envelope.waited).toBe(0);
@@ -77,7 +78,7 @@ describe("opencode_status waitMs", () => {
       flip.unref?.();
 
       const startedAt = Date.now();
-      const envelope = (await opencodeStatus({ jobId, waitMs: 8_000 })).structuredContent as WaitEnvelope;
+      const envelope = readEnvelope<WaitEnvelope>(await opencodeStatus({ jobId, waitMs: 8_000 }));
       const elapsed = Date.now() - startedAt;
       clearTimeout(flip);
 
@@ -91,7 +92,7 @@ describe("opencode_status waitMs", () => {
 
   test("gives up at the budget and reports a non-terminal record", async () => {
     await withStore({ id: "job_wait_expire" }, async ({ jobId }) => {
-      const envelope = (await opencodeStatus({ jobId, waitMs: 1_200 })).structuredContent as WaitEnvelope;
+      const envelope = readEnvelope<WaitEnvelope>(await opencodeStatus({ jobId, waitMs: 1_200 }));
 
       expect(envelope.terminal).toBe(false);
       expect(envelope.job?.status).toBe("running");
@@ -107,7 +108,7 @@ describe("opencode_status waitMs", () => {
       }, 600);
       cancel.unref?.();
 
-      const envelope = (await opencodeStatus({ jobId, waitMs: 10_000 })).structuredContent as WaitEnvelope;
+      const envelope = readEnvelope<WaitEnvelope>(await opencodeStatus({ jobId, waitMs: 10_000 }));
       clearTimeout(cancel);
 
       expect(envelope.terminal).toBe(true);
@@ -120,7 +121,7 @@ describe("opencode_status waitMs", () => {
     await withStore(
       { id: "job_wait_clamped", status: "succeeded", finishedAt: new Date().toISOString() },
       async ({ jobId }) => {
-        const envelope = (await opencodeStatus({ jobId, waitMs: 3_000_000 })).structuredContent as WaitEnvelope;
+        const envelope = readEnvelope<WaitEnvelope>(await opencodeStatus({ jobId, waitMs: 3_000_000 }));
 
         expect(MAX_WAIT_MS).toBe(240_000);
         expect(envelope.warnings.some((warning) => warning.includes(`clamped to ${MAX_WAIT_MS}`))).toBe(true);
@@ -151,9 +152,9 @@ describe("opencode_result waitMs", () => {
       }, 700);
       flip.unref?.();
 
-      const envelope = (await opencodeResult({ jobId, waitMs: 8_000 })).structuredContent as WaitEnvelope & {
-        outputSummary: { finalText?: string };
-      };
+      const envelope = readEnvelope<WaitEnvelope & { outputSummary: { finalText?: string } }>(
+        await opencodeResult({ jobId, waitMs: 8_000 })
+      );
       clearTimeout(flip);
 
       expect(envelope.terminal).toBe(true);

@@ -10,6 +10,7 @@ import {
 } from "../plugins/opencode-plugin-codex/src/model-guard.js";
 import { opencodeRun } from "../plugins/opencode-plugin-codex/src/tools.js";
 import { resetOpenCodeDiscoveryCache } from "../plugins/opencode-plugin-codex/src/opencode-cli.js";
+import { readEnvelope } from "./helpers/envelope.js";
 
 afterEach(() => {
   resetEffectiveModelCache();
@@ -172,13 +173,11 @@ describe("execution tools report which model decided the call", () => {
       const previous = process.env.OPENCODE_BIN;
       process.env.OPENCODE_BIN = bin;
       try {
-        const response = (
-          await opencodeRun({ cwd: process.cwd(), background: false, prompt: "model guard probe" })
-        ).structuredContent as {
+        const response = readEnvelope<{
           stdout?: string;
           warnings: string[];
           modelSelection: { source: string; configured?: string };
-        };
+        }>(await opencodeRun({ cwd: process.cwd(), background: false, prompt: "model guard probe" }));
         const invocation = JSON.parse((response.stdout ?? "").trim()) as { args: string[] };
 
         expect(invocation.args).not.toContain("--model");
@@ -199,19 +198,19 @@ describe("execution tools report which model decided the call", () => {
       const previous = process.env.OPENCODE_BIN;
       process.env.OPENCODE_BIN = bin;
       try {
-        const response = (
+        const response = readEnvelope<{
+          ok: boolean;
+          stdout?: string;
+          warnings: string[];
+          modelSelection: { source: string; requested?: string; configured?: string };
+        }>(
           await opencodeRun({
             cwd: process.cwd(),
             background: false,
             prompt: "model override probe",
             model: "deepseek/deepseek-v4-flash"
           })
-        ).structuredContent as {
-          ok: boolean;
-          stdout?: string;
-          warnings: string[];
-          modelSelection: { source: string; requested?: string; configured?: string };
-        };
+        );
         const invocation = JSON.parse((response.stdout ?? "").trim()) as { args: string[] };
 
         expect(response.ok).toBe(true);

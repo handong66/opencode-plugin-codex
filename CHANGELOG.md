@@ -5,6 +5,38 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 
 ## Unreleased — 0.2.0
 
+### Contract
+
+- **OC-9 (breaking)** Every tool now returns one envelope:
+  `{ ok, error?: { code, message, retryable, details? }, warnings: string[], data }`.
+  There used to be four shapes (background submit, foreground result, status,
+  result), only `opencode_transfer` ever emitted `{code,message}`, and boundary
+  failures were bare MCP exceptions with no code at all — which is how 9,892 recorded
+  events carried exactly one error code between them.
+  - The payload moved into `data`: `job`, `record`, `stdout`, `stderr`,
+    `outputSummary`, `providersRaw`, `modelsRaw`, `continuation`, `importedMessages`,
+    `workspace`, `effectiveModel`, `tried`, `errors`, `source`, `rolloutFile`, `model`.
+    Read `structuredContent.data`.
+  - Small scalars are still mirrored at the top level for the transition:
+    `background`, `terminal`, `nextAction`, `waited`, `resumable`,
+    `openCodeSessionId`, `opencodeSessionId`, `errorClass`, `exitCode`, `bin`,
+    `version`, `opencodeBin`, `stdoutTruncated`, `stderrTruncated`, `maxChars`,
+    `maxCharsClamped`, `view`, `rawOmitted`, `modelSelection`, `importSucceeded`,
+    `continuationStarted`, `continuationResultComplete`. Bulk fields are deliberately
+    **not** mirrored: duplicating them would undo OX2.
+  - Boundary refusals are **returned, not thrown**. `opencode_run` with a `cwd`
+    outside the workspace roots now returns
+    `{ ok: false, error: { code: "workspace_out_of_bounds", retryable: false, details: { roots } } }`
+    instead of raising an MCP error with no code.
+  - `warnings` is always present and always an array.
+  - `error.code` shares one vocabulary with the OC-3 `errorClass` values and with
+    grok-plugin-codex, and `retryable` follows the same table: `quota_exhausted`,
+    `auth_required`, `model_unauthorized`, `model_not_found`, every boundary code and
+    `cli_not_found` are not retryable; `timeout`, `terminated`, `rate_limited`,
+    `network_error`, `opencode_failed`, `cli_probe_timeout`, `unknown` are.
+  - A failed foreground run now also carries `error`, matching what `opencode_status`
+    already did for background jobs.
+
 ### Changed
 
 - **OC-7** The `model` parameter description no longer encourages passing a model on

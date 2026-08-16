@@ -59,14 +59,14 @@ describe("response payload duplication", () => {
         structuredContentOnly?: boolean;
         payloadChars?: number;
       };
-      const structured = response.structuredContent as { stdout?: string };
+      const structured = response.structuredContent as { data?: { stdout?: string } };
 
       expect(summary.structuredContentOnly).toBe(true);
       expect(summary.ok).toBe(true);
       expect(summary.payloadChars).toBeGreaterThan(8_192);
       expect(text.length).toBeLessThan(500);
-      // The full payload is still there, exactly once.
-      expect(structured.stdout).toContain("x".repeat(1_000));
+      // The full payload is still there, exactly once — in data, since 0.2.0.
+      expect(structured.data?.stdout).toContain("x".repeat(1_000));
     });
   });
 

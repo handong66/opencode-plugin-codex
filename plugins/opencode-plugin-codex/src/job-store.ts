@@ -6,8 +6,8 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  describeDiscoveryFailure,
   detectOpenCodeJsonlError,
+  discoveryFailure,
   discoverOpenCode,
   isRetryableOpenCodeFailure,
   openCodeFailureMessage,
@@ -591,7 +591,7 @@ export class JobStore {
     await this.ensure();
     const discovered = await discoverOpenCode({ opencodeBin: params.opencodeBin, env: this.env });
     if (!discovered.ok || !discovered.bin) {
-      throw new Error(describeDiscoveryFailure(discovered));
+      throw discoveryFailure(discovered);
     }
     if (!existsSync(this.workerPath)) {
       throw new Error(`OpenCode background worker not found: ${this.workerPath}. Run the plugin build first.`);

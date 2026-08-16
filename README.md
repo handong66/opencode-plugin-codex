@@ -39,7 +39,17 @@ Only `outputSummary.resultComplete === true` is a finished OpenCode answer. Runn
 
 `outputSummary.finalText` carries that answer in full (bounded at `32000`, with `finalTextTruncated`), so the stdout tail is evidence rather than the answer. The summary also reports what the run did — `toolCallCount`, `filesInspected`, `turnsUsed`, `skillsLoaded[]`, `evidenceLevel`, `permissionDenied`/`deniedPaths` — and a `review` or `adversarial_review` that made zero tool calls is reported as `resultComplete: false` with a warning; it is an opinion, not a review.
 
-On `opencode_status`, `opencode_result`, and `opencode_cancel`, `ok` describes the **job's** outcome, not the query's: a `failed` or `cancelled` job returns `ok: false` with `error: { code, message, retryable }`. `terminal` and `nextAction` say whether the record can still change. Read results from MCP `structuredContent`: a payload above `8192` characters is not duplicated into the text block.
+## Result envelope
+
+Every tool returns the same shape:
+
+```
+{ ok, error?: { code, message, retryable, details? }, warnings: string[], data }
+```
+
+`data` holds the payload (`job`, `record`, `stdout`, `stderr`, `outputSummary`, `workspace`, `effectiveModel`, `continuation`, …). Small scalars — `terminal`, `nextAction`, `waited`, `resumable`, `openCodeSessionId`, `errorClass`, `exitCode`, `maxChars`, `maxCharsClamped`, `view`, `modelSelection`, `background`, `importSucceeded` and friends — are also mirrored at the top level for the 0.2 transition; the bulk fields are not, because duplicating them is what 0.2.0 removed. Read results from MCP `structuredContent`: a payload above `8192` characters is not duplicated into the text block.
+
+Boundary refusals are returned, not thrown: a `cwd` outside the workspace roots comes back as `{ ok: false, error: { code: "workspace_out_of_bounds", retryable: false, details: { roots } } }`. The codes are `workspace_unavailable`, `workspace_out_of_bounds`, `file_attachment_invalid`, `private_path_blocked`, `rollout_invalid`, `state_write_failed`, `cli_not_found`, `cli_probe_timeout`, plus the `errorClass` vocabulary for OpenCode's own failures. On `opencode_status`, `opencode_result`, and `opencode_cancel`, `ok` describes the **job's** outcome, not the query's: a `failed` or `cancelled` job returns `ok: false` with `error: { code, message, retryable }`, and `terminal`/`nextAction` say whether the record can still change.
 
 ## Transfer privacy
 

@@ -13,13 +13,14 @@ import {
   opencodeStatus,
   opencodeTransfer
 } from "../plugins/opencode-plugin-codex/src/tools.js";
+import { readEnvelope, refusalOf } from "./helpers/envelope.js";
 
 /**
  * Read the structured object, not `content[0].text`: a payload over 8KB is returned
  * once, as structuredContent, and is deliberately not duplicated as text.
  */
 function parseToolResult(result: { structuredContent: unknown }) {
-  return result.structuredContent as {
+  return readEnvelope<{
     ok: boolean;
     exitCode?: number | null;
     stdout?: string;
@@ -40,7 +41,7 @@ function parseToolResult(result: { structuredContent: unknown }) {
       errorClass?: string;
       guidance: string;
     };
-  };
+  }>(result);
 }
 
 async function withTempJob<T>(
@@ -197,25 +198,31 @@ describe("opencodeRun", () => {
       "x".repeat(300)
     ].join("\n");
 
-    await expect(
+    const error = await refusalOf(() =>
       opencodeRun({
         cwd: process.cwd(),
         background: false,
         prompt: "review this",
         files: [promptLikeFile]
       })
-    ).rejects.toThrow(/files.*filesystem paths.*prompt/i);
+    );
+
+    expect(error.code).toBe("file_attachment_invalid");
+    expect(error.message).toMatch(/files.*filesystem paths.*prompt/i);
   });
 
   test("rejects file attachments outside the active workspace", async () => {
-    await expect(
+    const error = await refusalOf(() =>
       opencodeRun({
         cwd: process.cwd(),
         background: false,
         prompt: "review the attachment",
         files: ["/etc/hosts"]
       })
-    ).rejects.toThrow(/outside.*workspace/i);
+    );
+
+    expect(error.code).toBe("file_attachment_invalid");
+    expect(error.message).toMatch(/outside.*workspace/i);
   });
 
   test("rejects workspace symlinks whose targets escape the workspace", async () => {
@@ -223,14 +230,17 @@ describe("opencodeRun", () => {
     try {
       const link = join(temp, "outside-hosts");
       await symlink("/etc/hosts", link);
-      await expect(
+      const error = await refusalOf(() =>
         opencodeRun({
           cwd: process.cwd(),
           background: false,
           prompt: "review the symlink",
           files: [link]
         })
-      ).rejects.toThrow(/outside.*workspace/i);
+      );
+
+      expect(error.code).toBe("file_attachment_invalid");
+      expect(error.message).toMatch(/outside.*workspace/i);
     } finally {
       await rm(temp, { recursive: true, force: true });
     }
@@ -239,26 +249,32 @@ describe("opencodeRun", () => {
   test("rejects working directories outside the MCP workspace", async () => {
     const outside = await mkdtemp(join(tmpdir(), "opencode-plugin-codex-outside-cwd-"));
     try {
-      await expect(
+      const error = await refusalOf(() =>
         opencodeRun({
           cwd: outside,
           background: false,
           prompt: "do not leave the active workspace"
         })
-      ).rejects.toThrow(/working directory.*outside.*workspace/i);
+      );
+
+      expect(error.code).toBe("workspace_out_of_bounds");
+      expect(error.message).toMatch(/working directory.*outside.*workspace/i);
     } finally {
       await rm(outside, { recursive: true, force: true });
     }
   });
 
   test("rejects prompts that ask OpenCode to read Codex private runtime paths by default", async () => {
-    await expect(
+    const error = await refusalOf(() =>
       opencodeRun({
         cwd: process.cwd(),
         background: false,
         prompt: "Before reviewing, read /Users/example/.codex/pua/skills/pua/SKILL.md and follow it."
       })
-    ).rejects.toThrow(/Codex private runtime paths/i);
+    );
+
+    expect(error.code).toBe("private_path_blocked");
+    expect(error.message).toMatch(/Codex private runtime paths/i);
   });
 
   test("maps automatic permission approval to the current OpenCode --auto flag", async () => {
@@ -278,14 +294,17 @@ describe("opencodeRun", () => {
   });
 
   test("does not let --auto bypass the Codex private-path prompt guard", async () => {
-    await expect(
+    const error = await refusalOf(() =>
       opencodeRun({
         cwd: process.cwd(),
         background: false,
         autoApprovePermissions: true,
         prompt: "Read ~/.codex/private/runtime.json."
       })
-    ).rejects.toThrow(/Codex private runtime paths/i);
+    );
+
+    expect(error.code).toBe("private_path_blocked");
+    expect(error.message).toMatch(/Codex private runtime paths/i);
   });
 
   test("allows private-path prompts only through the separate explicit boundary", async () => {
@@ -458,13 +477,16 @@ describe("opencodeAdversarialReview", () => {
 
 describe("opencodeTransfer", () => {
   test("rejects explicit rollout files outside the workspace and Codex sessions directory", async () => {
-    await expect(
+    const error = await refusalOf(() =>
       opencodeTransfer({
         cwd: process.cwd(),
         model: "provider/model",
         rolloutFile: "/etc/hosts"
       })
-    ).rejects.toThrow(/rollout file.*outside/i);
+    );
+
+    expect(error.code).toBe("rollout_invalid");
+    expect(error.message).toMatch(/rollout file.*outside/i);
   });
 
   test("requires an explicit imported session confirmation even when import exits zero", async () => {

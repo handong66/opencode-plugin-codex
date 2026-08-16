@@ -4,6 +4,7 @@ import { delimiter, join } from "node:path";
 import { homedir } from "node:os";
 import { spawn } from "node:child_process";
 import type { ProcessResult } from "./types.js";
+import { BoundaryError } from "./boundary.js";
 
 export type DiscoverOpenCodeOptions = {
   opencodeBin?: string;
@@ -293,6 +294,19 @@ export async function discoverOpenCode(
   };
 }
 
+/**
+ * The typed refusal a caller sees when discovery fails.
+ *
+ * `cli_not_found` and `cli_probe_timeout` are separate because they need different
+ * responses: one is a configuration problem, the other may answer next time.
+ */
+export function discoveryFailure(discovered: DiscoverOpenCodeResult): BoundaryError {
+  return new BoundaryError(discovered.errorCode ?? "cli_not_found", describeDiscoveryFailure(discovered), {
+    tried: discovered.tried,
+    errors: discovered.errors
+  });
+}
+
 /** The message a caller sees when discovery fails: paths *and* reasons. */
 export function describeDiscoveryFailure(discovered: DiscoverOpenCodeResult): string {
   const reasons = discovered.errors.slice(-5);
@@ -313,7 +327,7 @@ export async function runOpenCode(
 ): Promise<ProcessResult & { bin: string }> {
   const discovered = await discoverOpenCode(options);
   if (!discovered.ok || !discovered.bin) {
-    throw new Error(describeDiscoveryFailure(discovered));
+    throw discoveryFailure(discovered);
   }
 
   const result = await runProcess(discovered.bin, args, options);

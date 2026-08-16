@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { JobStore, type JobRecord } from "../plugins/opencode-plugin-codex/src/job-store.js";
 import { opencodeCancel, opencodeResult, opencodeStatus } from "../plugins/opencode-plugin-codex/src/tools.js";
+import { readEnvelope } from "./helpers/envelope.js";
 
 type Envelope = {
   ok: boolean;
@@ -58,8 +59,8 @@ describe("top-level ok mirrors the job outcome", () => {
       },
       async (jobId) => {
         for (const envelope of [
-          (await opencodeStatus({ jobId })).structuredContent as Envelope,
-          (await opencodeResult({ jobId })).structuredContent as Envelope
+          readEnvelope<Envelope>(await opencodeStatus({ jobId })),
+          readEnvelope<Envelope>(await opencodeResult({ jobId }))
         ]) {
           expect(envelope.ok).toBe(false);
           expect(envelope.terminal).toBe(true);
@@ -82,7 +83,7 @@ describe("top-level ok mirrors the job outcome", () => {
         finishedAt: new Date().toISOString()
       },
       async (jobId) => {
-        const envelope = (await opencodeStatus({ jobId })).structuredContent as Envelope;
+        const envelope = readEnvelope<Envelope>(await opencodeStatus({ jobId }));
 
         expect(envelope.error?.retryable).toBe(true);
       }
@@ -91,7 +92,7 @@ describe("top-level ok mirrors the job outcome", () => {
 
   test("a succeeded job stays ok and terminal", async () => {
     await withJob({ id: "job_envelope_ok", status: "succeeded", finishedAt: new Date().toISOString() }, async (jobId) => {
-      const envelope = (await opencodeStatus({ jobId })).structuredContent as Envelope;
+      const envelope = readEnvelope<Envelope>(await opencodeStatus({ jobId }));
 
       expect(envelope.ok).toBe(true);
       expect(envelope.terminal).toBe(true);
@@ -104,7 +105,7 @@ describe("top-level ok mirrors the job outcome", () => {
     await withJob(
       { id: "job_envelope_running", status: "running", workerPid: process.pid },
       async (jobId) => {
-        const envelope = (await opencodeStatus({ jobId })).structuredContent as Envelope;
+        const envelope = readEnvelope<Envelope>(await opencodeStatus({ jobId }));
 
         expect(envelope.ok).toBe(true);
         expect(envelope.terminal).toBe(false);
@@ -118,7 +119,7 @@ describe("top-level ok mirrors the job outcome", () => {
     // Queued and just created: inside the worker startup grace, so no PID is signalled.
     const overrides = { id: "job_envelope_cancel", status: "queued" as const, createdAt: new Date().toISOString() };
     await withJob(overrides, async (jobId) => {
-      const envelope = (await opencodeCancel({ jobId })).structuredContent as Envelope;
+      const envelope = readEnvelope<Envelope>(await opencodeCancel({ jobId }));
 
       expect(envelope.job?.status).toBe("cancelled");
       expect(envelope.ok).toBe(false);
@@ -133,7 +134,7 @@ describe("polling a record that cannot change", () => {
     const finishedAt = new Date(Date.now() - 20 * 60_000).toISOString();
 
     await withJob({ id: "job_envelope_stale", status: "succeeded", finishedAt }, async (jobId) => {
-      const envelope = (await opencodeStatus({ jobId })).structuredContent as Envelope;
+      const envelope = readEnvelope<Envelope>(await opencodeStatus({ jobId }));
 
       expect((envelope.warnings ?? []).join(" ")).toMatch(/final/i);
       expect((envelope.warnings ?? []).join(" ")).toMatch(/20 minutes/);
@@ -144,7 +145,7 @@ describe("polling a record that cannot change", () => {
     await withJob(
       { id: "job_envelope_fresh", status: "succeeded", finishedAt: new Date().toISOString() },
       async (jobId) => {
-        const envelope = (await opencodeStatus({ jobId })).structuredContent as Envelope;
+        const envelope = readEnvelope<Envelope>(await opencodeStatus({ jobId }));
 
         expect(envelope.warnings).toEqual([]);
       }

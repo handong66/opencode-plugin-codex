@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { opencodeRun } from "../plugins/opencode-plugin-codex/src/tools.js";
+import { readEnvelope } from "./helpers/envelope.js";
 
 const dirs: string[] = [];
 let previousBin: string | undefined;
@@ -46,13 +47,11 @@ describe("foreground response bounds", () => {
     // a background job returned 20,000; the largest measured payload was 1,341,598.
     await verboseOpenCode(300_000);
 
-    const result = (
-      await opencodeRun({ cwd: process.cwd(), background: false, prompt: "verbose probe" })
-    ).structuredContent as {
+    const result = readEnvelope<{
       stdout?: string;
       stdoutTruncated?: boolean;
       outputSummary?: { resultComplete: boolean; finalText?: string };
-    };
+    }>(await opencodeRun({ cwd: process.cwd(), background: false, prompt: "verbose probe" }));
 
     expect(result.stdout).toHaveLength(20_000);
     expect(result.stdoutTruncated).toBe(true);
@@ -64,9 +63,9 @@ describe("foreground response bounds", () => {
   test("leaves a small response whole", async () => {
     await verboseOpenCode(10);
 
-    const result = (
+    const result = readEnvelope<{ stdout?: string; stdoutTruncated?: boolean }>(
       await opencodeRun({ cwd: process.cwd(), background: false, prompt: "small probe" })
-    ).structuredContent as { stdout?: string; stdoutTruncated?: boolean };
+    );
 
     expect(result.stdoutTruncated).toBe(false);
     expect(result.stdout).toContain("step_finish");

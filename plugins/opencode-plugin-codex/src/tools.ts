@@ -1035,20 +1035,44 @@ async function opencodeTransferImpl(args: TransferArgs) {
   const configured = await probeEffectiveModel({ opencodeBin: discovered.bin, cwd });
   const selection = describeModelSelection({ requested: args.model, probe: configured });
   warnings.push(...selection.warnings);
-  const model = args.model ?? selection.modelSelection.configured;
+  // A configuration that sets models per agent instead of at the root is still a
+  // readable configuration with a real default. Refusing there sent the caller back
+  // to an explicit, unverified model — the move OC-7 removed everywhere else — and
+  // the refusal below then claimed the default "could not be read", which
+  // contradicted this plugin's own modelSelection.configUnavailable:false.
+  const agents = selection.modelSelection.agents;
+  const agentFallback = agents?.build?.model
+    ? { model: agents.build.model, from: "agent.build" }
+    : agents?.plan?.model
+      ? { model: agents.plan.model, from: "agent.plan" }
+      : undefined;
+  const model = args.model ?? selection.modelSelection.configured ?? agentFallback?.model;
   if (!model) {
+    // Only an unreadable configuration and a configuration that names nothing at all
+    // are refusals, and they are not the same problem, so they do not share wording.
+    const unreadable = selection.modelSelection.configUnavailable === true;
     return envelope({
       ok: false,
       error: {
         code: "opencode_model_required",
-        message:
-          "The imported session file has to name a model, and OpenCode's configured default could not be read " +
-          "(run opencode_check to see effectiveModel). Pass model explicitly for this call, or fix the OpenCode " +
-          "configuration so the default is readable.",
+        message: unreadable
+          ? "The imported session file has to name a model, and OpenCode's configured default could not be read " +
+            "(run opencode_check to see effectiveModel). Pass model explicitly for this call, or fix the OpenCode " +
+            "configuration so the default is readable."
+          : "The imported session file has to name a model, and the OpenCode configuration this plugin read " +
+            "names no model — no root `model` and no `agent.build` or `agent.plan` model (run opencode_check to " +
+            "see effectiveModel). Pass model explicitly for this call, or set a default model in the OpenCode " +
+            "configuration.",
         retryable: false
       },
       warnings
     });
+  }
+  if (!args.model && !selection.modelSelection.configured && agentFallback) {
+    warnings.push(
+      `The OpenCode configuration sets no root model, so the imported session names ${agentFallback.from}'s ` +
+        `model "${agentFallback.model}". Pass model explicitly if the transferred session should use another one.`
+    );
   }
 
   const session = toOpenCodeSession(transcript, {

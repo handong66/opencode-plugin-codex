@@ -73,7 +73,7 @@ One tool's own failure, in the same envelope. These never appear as `errorClass`
 | `session_listing_failed` | yes | `opencode_sessions` | `opencode session list` exited non-zero or returned unparseable JSON. Check the CLI with `opencode_check` before retrying. |
 | `codex_thread_missing` | no | `opencode_transfer` | No Codex rollout JSONL was found. Pass `rolloutFile`, or inline the context in `prompt` instead — usually cheaper than a transfer. |
 | `codex_transcript_empty` | no | `opencode_transfer` | The rollout has no visible user/assistant messages. Nothing to transfer. |
-| `opencode_model_required` | no | `opencode_transfer` | An imported session file has to name a model and OpenCode's configured default could not be read. Fix the configuration, or pass `model` for this call only. Every other tool falls back to the configured default. |
+| `opencode_model_required` | no | `opencode_transfer` | An imported session file has to name a model and the OpenCode configuration could not be read, or names none at all (no root `model`, no `agent.build`/`agent.plan` model). The message says which. Fix the configuration, or pass `model` for this call only. Every other tool falls back to the configured default. |
 | `opencode_import_failed` | yes | `opencode_transfer` | `opencode import` exited non-zero or never confirmed a session id. |
 | `opencode_import_verify_failed` | yes | `opencode_transfer` | The session imported but could not be read back, so the id is not trustworthy. Do not continue against it. |
 

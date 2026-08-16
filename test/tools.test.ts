@@ -1075,3 +1075,72 @@ describe("opencodeTransfer model default", () => {
     }
   });
 });
+
+describe("opencodeTransfer model fallback", () => {
+  /**
+   * A transfer against a fake CLI whose `debug config` prints `configJson` (or
+   * exits non-zero when it is undefined).
+   */
+  async function transferAgainstConfig(configJson: string | undefined) {
+    const binDir = await mkdtemp(join(tmpdir(), "opencode-plugin-codex-transfer-fallback-"));
+    const previous = process.env.OPENCODE_BIN;
+    try {
+      const bin = join(binDir, "fake-transfer-opencode.mjs");
+      await writeFile(
+        bin,
+        [
+          "#!/usr/bin/env node",
+          "if (process.argv[2] === '--version') console.log('1.18.16');",
+          configJson === undefined
+            ? "else if (process.argv[2] === 'debug') { console.error('could not read config'); process.exit(1); }"
+            : `else if (process.argv[2] === 'debug') console.log(${JSON.stringify(configJson)});`,
+          "else if (process.argv[2] === 'import') console.log('Imported session: ses_fallback');",
+          "else if (process.argv[2] === 'export') console.log(JSON.stringify({ info: { id: 'ses_fallback' }, messages: [] }));"
+        ].join("\n")
+      );
+      await chmod(bin, 0o755);
+      process.env.OPENCODE_BIN = bin;
+
+      return await opencodeTransfer({
+        cwd: process.cwd(),
+        rolloutFile: join(process.cwd(), "test/fixtures/codex-rollout-current-visible.jsonl")
+      });
+    } finally {
+      if (previous === undefined) delete process.env.OPENCODE_BIN;
+      else process.env.OPENCODE_BIN = previous;
+      await rm(binDir, { recursive: true, force: true });
+    }
+  }
+
+  test("uses the build agent's model when the configuration sets no root model", async () => {
+    // A configuration that only sets agent models was read perfectly well, and the
+    // refusal below still claimed the default "could not be read" — which pushed the
+    // caller straight back to the explicit unverified model OC-7 exists to avoid.
+    const result = parseToolResult(
+      await transferAgainstConfig(JSON.stringify({ agent: { build: { model: "aihubmix/deepseek-v4" } } }))
+    ) as ReturnType<typeof parseToolResult> & { model?: { providerID: string; modelID: string } };
+
+    expect(result.ok).toBe(true);
+    expect(result.model?.providerID).toBe("aihubmix");
+    expect(result.model?.modelID).toBe("deepseek-v4");
+    expect(result.warnings?.some((warning) => warning.includes("agent.build"))).toBe(true);
+  });
+
+  test("still refuses when the configuration could not be read at all", async () => {
+    const error = await refusalOf(() => transferAgainstConfig(undefined));
+
+    expect(error.code).toBe("opencode_model_required");
+    expect(error.retryable).toBe(false);
+    expect(error.message).toMatch(/could not be read/);
+  });
+
+  test("refuses without claiming the configuration was unreadable when it names no model", async () => {
+    const error = await refusalOf(() => transferAgainstConfig(JSON.stringify({ provider: {} })));
+
+    expect(error.code).toBe("opencode_model_required");
+    // describeModelSelection reports configUnavailable:false here, so saying the
+    // configuration could not be read would contradict the plugin's own record.
+    expect(error.message).not.toMatch(/could not be read/);
+    expect(error.message).toMatch(/names no model/);
+  });
+});

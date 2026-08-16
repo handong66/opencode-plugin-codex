@@ -237,8 +237,12 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   place carrying "an explicit authorized model is required" — the wording OC-7
   removed everywhere else because it is what pushes callers into passing unverified
   models — and it now falls back to OpenCode's configured default, reporting
-  `modelSelection` like every other tool. Only an unreadable configuration is a
-  refusal, and the message says to run `opencode_check`. The tool description also
+  `modelSelection` like every other tool — and when that configuration sets models
+  per agent rather than at the root, the `agent.build` (then `agent.plan`) model is
+  the fallback, with a warning naming which one was used. Only an unreadable
+  configuration, or one that names no model anywhere, is a refusal, and the two now
+  say which they are: the earlier refusal claimed the default "could not be read"
+  even for a configuration the plugin had just read successfully. The tool description also
   states plainly that this is an opt-in path: zero calls in two months of recorded
   traffic, it reads a Codex private rollout file, and inlining the relevant context
   into an `opencode_run` prompt is usually cheaper.

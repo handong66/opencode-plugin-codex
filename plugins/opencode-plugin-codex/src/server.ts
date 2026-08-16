@@ -225,8 +225,10 @@ server.registerTool(
   {
     title: "OpenCode Rescue",
     description:
-      "Ask OpenCode for an independent read-only diagnosis of a stuck task. Use it when you want a second opinion " +
-      "on why something fails, not to make changes. Done means outputSummary.resultComplete === true.",
+      "Ask OpenCode for an independent diagnosis of a stuck task. Use it when you want a second opinion on why " +
+      "something fails, not to make changes: the prompt tells OpenCode to stay read-only unless your problem text " +
+      "says otherwise. That is an instruction, not a sandbox — autoApprovePermissions below also approves writes, " +
+      "so leave it unset for a diagnosis. Done means outputSummary.resultComplete === true.",
     inputSchema: {
       ...commonShape,
       problem: z.string().min(1).max(250_000),

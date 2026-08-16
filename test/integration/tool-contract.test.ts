@@ -111,6 +111,25 @@ describe("published tool schemas", () => {
     }
   });
 
+  test("never calls a tool read-only without naming the parameter that is not", async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+
+    // opencode_rescue was advertised as "an independent read-only diagnosis ... not
+    // to make changes" while exposing autoApprovePermissions, whose own schema text
+    // says --auto also approves writes. A caller reading only the tool description
+    // could hand it that flag believing the tool could not write.
+    const checked = tools.filter(
+      (tool) => (tool.inputSchema.properties ?? {}).autoApprovePermissions !== undefined
+    );
+    expect(checked.length).toBeGreaterThan(0);
+    for (const tool of checked) {
+      const description = tool.description ?? "";
+      if (!/read-only/i.test(description)) continue;
+      expect(description, tool.name).toMatch(/autoApprovePermissions/);
+    }
+  });
+
   test("publishes the tool-call ceiling where the worker can enforce it", async () => {
     const client = await connect();
 

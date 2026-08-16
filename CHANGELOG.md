@@ -184,6 +184,16 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
   reference for the rest. Codex read the bundled `SKILL.md` 175 times across 58
   sessions at 1.7–2.3K tokens each, mostly to re-learn tool selection and completion
   rules. The plugin directory name is unchanged, and stays that way between versions.
+- **X9** `opencode_rescue` no longer calls itself "read-only". It advertised "an
+  independent read-only diagnosis ... not to make changes" while exposing
+  `autoApprovePermissions`, whose own text says `--auto` also approves writes, so a
+  caller reading the tool description could hand it that flag believing the tool
+  could not write. The description now says the read-only instruction lives in the
+  prompt and is not a sandbox, and names the parameter that lifts it; the bundled
+  Skill's tool-selection list says the same. The parameter itself stays (OC-4.3
+  requires it on `opencode_run`, `opencode_continue` and `opencode_rescue`), and an
+  integration test now fails any tool that calls itself read-only while accepting
+  `autoApprovePermissions` without naming it.
 - **OC supplementary 2** The contract-bearing half of the collaboration Skill is now
   vendored into the plugin as
   `skills/opencode/references/failure-routing.md`, so it ships and versions with the

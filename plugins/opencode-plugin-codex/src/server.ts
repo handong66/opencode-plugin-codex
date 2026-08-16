@@ -62,7 +62,17 @@ function withCodexWorkspaceRoots<T extends Record<string, unknown>>(
 
 const commonShape = {
   cwd: z.string().min(1).max(4_096).optional().describe("Working directory inside the MCP server workspace. Defaults to the workspace root."),
-  model: z.string().min(1).max(512).optional().describe("OpenCode model in provider/model form. Pass an actually authorized model from the user's OpenCode provider config.")
+  model: z
+    .string()
+    .min(1)
+    .max(512)
+    .optional()
+    .describe(
+      "Omit `model` for normal collaboration so OpenCode uses its configured default. " +
+        "Pass an explicit model only when the user requested that override or continuation requires a " +
+        "previously verified model. In provider/model form. The response reports modelSelection " +
+        "(`opencode_config` or `explicit`) and warns when an explicit value overrides the configured default."
+    )
 };
 
 const jobIdSchema = z.string().regex(/^job_[A-Za-z0-9_-]{1,128}$/);

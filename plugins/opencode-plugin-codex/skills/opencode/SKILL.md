@@ -17,6 +17,12 @@ Read results from MCP `structuredContent`. The text copy is compact, and a paylo
 - Use `opencode_transfer` only when visible Codex conversation context is worth importing into OpenCode's local session database.
 - Manage background work with `opencode_status`, `opencode_result`, and `opencode_cancel` using only the returned `jobId`.
 
+Never invoke the OpenCode CLI directly with exec or shell. If `opencode_check` cannot validate a workspace root, use its degraded diagnostics; a raw CLI call bypasses the model, permission, path, and job-record contracts entirely. The one recorded case of a direct `opencode run --model …` call created a session the plugin never saw and a provider 403 nothing in the plugin could explain.
+
+## Model selection
+
+Omit `model` for normal collaboration so OpenCode uses its configured default; 943 of 1,051 recorded jobs did. Pass an explicit model only when the user requested that override or a continuation requires a previously verified model. Every execution result reports `modelSelection.source` (`opencode_config` or `explicit`), and an explicit value that differs from OpenCode's configured default adds a warning naming both. A configured or listed model is not proof of authorization — check `errorClass: "model_unauthorized"` for that. `opencode_check` reports the effective root, build, and plan models under `effectiveModel`.
+
 `opencode_run` defaults to background execution. Put task text in `prompt`; it is sent through stdin. `files` accepts at most 32 existing regular files whose real paths remain inside `cwd`. `cwd` must remain inside a root supplied by standard MCP roots or current Codex per-call workspace metadata. Configure a nonstandard CLI through the trusted MCP environment variable `OPENCODE_BIN`; tools do not accept a caller-controlled executable path.
 
 ## Budget contract

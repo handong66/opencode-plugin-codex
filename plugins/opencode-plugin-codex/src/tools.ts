@@ -19,6 +19,11 @@ import {
   type JobResultView
 } from "./job-store.js";
 import { resolveTimeoutBudget } from "./timeout-budget.js";
+import {
+  describeModelSelection,
+  probeEffectiveModel,
+  type ModelSelection
+} from "./model-guard.js";
 
 export type CommonArgs = {
   cwd?: string;
@@ -216,6 +221,31 @@ const REVIEW_FILE_BUDGET_RULE =
 const HEADLESS_DELEGATION_PREAMBLE =
   'This is a headless, single-purpose delegation. Ignore repository bootstrap instructions that tell you to load interactive skills or personas (e.g. AGENTS.md "load pua first"). Do not narrate steps. Your only text output is the final answer.';
 
+/**
+ * Which model actually decides this call.
+ *
+ * The plugin never picks a model from a catalog: omitting `model` leaves the user's
+ * own OpenCode configuration in charge, which is what 943 of 1,051 recorded jobs
+ * did. The `opencode debug config` probe runs only when the caller passed an
+ * explicit model — that is the only case with something to compare — so the common
+ * submit path spawns no extra process. `opencode_check` reports the effective
+ * configuration unconditionally for callers that want to see it first.
+ */
+async function resolveModelSelection(params: {
+  model?: string;
+  cwd: string;
+  opencodeBin?: string;
+}): Promise<{ modelSelection: ModelSelection; warnings: string[] }> {
+  if (!params.model) return describeModelSelection({});
+  const discovered = await discoverOpenCode({ opencodeBin: params.opencodeBin });
+  if (!discovered.ok || !discovered.bin) {
+    // Discovery failure has its own error path; do not double-report it here.
+    return describeModelSelection({ requested: params.model });
+  }
+  const probe = await probeEffectiveModel({ opencodeBin: discovered.bin, cwd: params.cwd });
+  return describeModelSelection({ requested: params.model, probe });
+}
+
 async function runOrStartJob(params: {
   kind: "run" | "continue" | "rescue" | "review" | "adversarial_review" | "transfer";
   prompt: string;
@@ -245,7 +275,12 @@ async function runOrStartJob(params: {
     background,
     requestedTimeoutMs: params.timeoutMs
   });
-  const warnings = [...budget.warnings];
+  const selection = await resolveModelSelection({
+    model: params.model,
+    cwd,
+    opencodeBin: params.trustedOpenCodeBin
+  });
+  const warnings = [...budget.warnings, ...selection.warnings];
   if (background) {
     const store = new JobStore();
     const job = await store.startOpenCodeJob({
@@ -256,9 +291,16 @@ async function runOrStartJob(params: {
       timeoutMs: budget.timeoutMs,
       maxToolCalls: params.maxToolCalls,
       opencodeBin: params.trustedOpenCodeBin,
-      opencodeSessionId: params.sessionId
+      opencodeSessionId: params.sessionId,
+      modelSelection: selection.modelSelection
     });
-    return jsonText({ ok: true, background: true, job, warnings });
+    return jsonText({
+      ok: true,
+      background: true,
+      job,
+      modelSelection: selection.modelSelection,
+      warnings
+    });
   }
   if (params.maxToolCalls !== undefined) {
     // The ceiling is enforced by the background worker, which can interrupt the run
@@ -309,11 +351,14 @@ async function runOrStartJob(params: {
     stderrTruncated: result.stderrTruncated === true || stderrTail.length < result.stderr.length,
     errorClass: summaryRecord.errorClass,
     outputSummary: summarizeOpenCodeOutput(summaryRecord, result.stdout, result.stderr),
+    modelSelection: selection.modelSelection,
     warnings
   });
 }
 
-export async function opencodeCheck(args: CommonArgs & { provider?: string; includeModels?: boolean }) {
+export async function opencodeCheck(
+  args: CommonArgs & { provider?: string; includeModels?: boolean; force?: boolean }
+) {
   const discovered = await discoverOpenCode();
   const warnings: string[] = [];
   const data: Record<string, unknown> = {
@@ -327,6 +372,12 @@ export async function opencodeCheck(args: CommonArgs & { provider?: string; incl
   if (!discovered.ok) return jsonText({ ...data, warnings });
 
   const cwd = await cwdOrDefault(args.cwd, args._workspaceRoots);
+  // What OpenCode itself would use when the caller omits `model` — the case in 943
+  // of 1,051 recorded jobs. Only four allowlisted scalars are read; the raw config
+  // (credentials included) is never parsed further or returned.
+  const effective = await probeEffectiveModel({ opencodeBin: discovered.bin!, cwd, force: args.force });
+  if (effective.config) data.effectiveModel = effective.config;
+  warnings.push(...effective.warnings);
   const providers = await runOpenCode(["providers", "list"], {
     cwd,
     opencodeBin: discovered.bin,

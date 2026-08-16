@@ -7,6 +7,14 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 
 ### Changed
 
+- **OC-7** The `model` parameter description no longer encourages passing a model on
+  every call ("Pass an actually authorized model from the user's OpenCode provider
+  config."). It now says to omit `model` for normal collaboration and to pass one only
+  for a requested override or a continuation that requires a previously verified model.
+  The bundled Skill and README also state that the OpenCode CLI must never be invoked
+  directly through exec or shell: the one recorded direct call created a session the
+  plugin never saw and a 403 it could not explain.
+
 - **Release metadata** `package.json`, `.codex-plugin/plugin.json` and the MCP `serverInfo`
   now all report `0.2.0`. They disagreed for the whole 0.1 era (`0.1.0` vs
   `0.1.0+codex.20260710103034`), so a caller could not pin the contract by version — and
@@ -105,6 +113,17 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 
 ### Added
 
+- **OC-7** `modelSelection` on every execution result and job record: `source` is
+  `opencode_config` when the caller omitted `model` (943 of 1,051 recorded jobs) and
+  `explicit` when it did not, plus `requested`, the `configured` default, and the
+  build/plan agent models. An explicit model that differs from OpenCode's configured
+  default adds a warning naming both — it never refuses the call, and there is no new
+  "authorization verified" field: a configured or listed model is still not proof of
+  authorization. The effective configuration comes from `opencode debug config`, of
+  which only the root/build/plan models and variants are parsed; the raw config is
+  never returned. The probe is memoised per binary and directory, and on the submit
+  path it runs only when an explicit model was passed, so the common case spawns
+  nothing extra. `opencode_check` reports it as `effectiveModel`.
 - **OC-6** `waitMs` on `opencode_status` and `opencode_result`. The server now blocks
   until the record is terminal (backing off 500ms → 5s, re-reading the record each
   round so an `opencode_cancel` from elsewhere ends the wait) and reports `waited`.

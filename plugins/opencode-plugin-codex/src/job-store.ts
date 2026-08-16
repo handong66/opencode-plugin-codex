@@ -14,6 +14,7 @@ import {
   sanitizeOpenCodeEnv
 } from "./opencode-cli.js";
 import { DEFAULT_TIMEOUT_MS } from "./timeout-budget.js";
+import type { ModelSelection } from "./model-guard.js";
 
 export type JobKind =
   | "run"
@@ -35,6 +36,12 @@ export type JobRecord = {
   workerPid?: number;
   pid?: number;
   opencodeSessionId?: string;
+  /**
+   * Which model decided this job: OpenCode's own configuration (the caller omitted
+   * `model`) or an explicit override. Recorded so a later 403 can be read against
+   * what was actually requested.
+   */
+  modelSelection?: ModelSelection;
   createdAt: string;
   startedAt?: string;
   finishedAt?: string;
@@ -567,6 +574,7 @@ export class JobStore {
     maxToolCalls?: number;
     opencodeBin?: string;
     opencodeSessionId?: string;
+    modelSelection?: ModelSelection;
   }): Promise<JobRecord> {
     await this.ensure();
     const discovered = await discoverOpenCode({ opencodeBin: params.opencodeBin, env: this.env });
@@ -586,6 +594,7 @@ export class JobStore {
       command: discovered.bin,
       args: params.args,
       opencodeSessionId: params.opencodeSessionId,
+      modelSelection: params.modelSelection,
       createdAt: new Date().toISOString(),
       timeoutMs: params.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       maxToolCalls: params.maxToolCalls,

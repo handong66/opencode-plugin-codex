@@ -155,6 +155,25 @@ Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to
 
 ### Added
 
+- **OC supplementary 2** The contract-bearing half of the collaboration Skill is now
+  vendored into the plugin as
+  `skills/opencode/references/failure-routing.md`, so it ships and versions with the
+  code that implements it, and `test/skill-contract.test.ts` fails the build when any
+  error code or result field named in the shipped Skill no longer exists in `src/`.
+  The previous release declared an out-of-repo Skill as its authority with nothing
+  comparing the two — the mechanism behind the timeout dogma, and one that would have
+  bitten the new error vocabulary and the typed envelope in exactly the same way.
+- **X8** The repository has CI: `.github/workflows/pull-request-ci.yml` runs
+  `npm run check` and `npm run test:integration` on ubuntu-latest and macos-latest.
+  Every gate previously ran by hand on the author's macOS machine, against a stated
+  expectation of "push the branch, open a PR, wait for CI, merge when it passes".
+- **X8** `npm run validate:plugin` now fails a release that carries the local
+  cachebuster: a tag pointing at `HEAD` (or `OPENCODE_PLUGIN_RELEASE=1`) plus a
+  `+codex.<timestamp>` manifest version is an error, while the same version during
+  development stays a warning. Two sibling plugins shipped as
+  `0.2.1+codex.20260711160539` and `0.1.0+codex.20260710103034`.
+- **X8** `docs/verification.md` carries a dated 0.2.0 record with the CLI and Node
+  versions it was verified against; the previous entry sat undated at CLI 1.17.15.
 - **OX10(c)** `opencode_check` reports the proxy variables the OpenCode CLI will
   inherit (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`) and warns when one
   is set, and it now runs `opencode agent list` and returns the agents. A global

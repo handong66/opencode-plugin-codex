@@ -13,6 +13,8 @@ Every tool returns one envelope: `{ ok, error?: { code, message, retryable, deta
 
 A boundary refusal is returned, not thrown: `workspace_unavailable`, `workspace_out_of_bounds` (which lists the roots that are available), `file_attachment_invalid`, `private_path_blocked`, `rollout_invalid`, `state_write_failed`, `cli_not_found`, `cli_probe_timeout`. All are `retryable: false` except `cli_probe_timeout`. Never work around one by calling the OpenCode CLI directly.
 
+Full failure routing (every `errorClass` and boundary code, what to do about each) and the polling contract are in [references/failure-routing.md](references/failure-routing.md), which ships and versions with this plugin.
+
 ## Choose a tool
 
 - Diagnose availability with `opencode_check`.

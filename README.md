@@ -95,7 +95,9 @@ npm audit --json
 git diff --check
 ```
 
-`npm run check` typechecks, builds both `dist/server.js` and the independent `dist/job-worker.js`, runs Vitest, validates the repository plugin shape, and smoke-tests all MCP schemas.
+`npm run check` typechecks, builds both `dist/server.js` and the independent `dist/job-worker.js`, runs Vitest, validates the repository plugin shape, and smoke-tests all MCP schemas. `.github/workflows/pull-request-ci.yml` runs `npm run check` and `npm run test:integration` on ubuntu-latest and macos-latest for every pull request and `release/**` push.
+
+`npm run validate:plugin` refuses a release that carries the local `+codex.<timestamp>` cachebuster: with a tag pointing at `HEAD`, or with `OPENCODE_PLUGIN_RELEASE=1`, that manifest version is an error rather than a warning.
 
 Live transfer is opt-in and uses a synthetic visible-transcript fixture rather than the current private Codex task:
 
@@ -110,6 +112,7 @@ The selected Codex orchestration Skill is intentionally not registered into Open
 ## Documentation authority
 
 - Plugin source and tests: machine behavior.
+- `plugins/opencode-plugin-codex/skills/opencode/references/failure-routing.md`: the vendored, version-bound failure-routing and polling contract. `test/skill-contract.test.ts` fails the build when it names a code or field that no longer exists in `src/`.
 - `plugins/opencode-plugin-codex/skills/opencode/SKILL.md`: concise tool/parameter/safety guidance.
 - Dong-skills `codex-opencode-collaboration`: full orchestration, review, recovery, transfer, and acceptance workflow.
 - `docs/development.md`: current architecture and maintenance rules.

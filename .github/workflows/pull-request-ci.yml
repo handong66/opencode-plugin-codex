@@ -1,0 +1,38 @@
+name: pull-request-ci
+
+# Every release gate ran on the author's own macOS machine, by hand: three of the
+# four sibling repositories had no CI at all, while the user's stated expectation
+# was "push the branch, open a PR, wait for CI, merge when it passes".
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "release/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # The plugin spawns detached workers and signals process groups; that is
+        # exactly the behaviour that differs between the two platforms it runs on.
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run test:integration

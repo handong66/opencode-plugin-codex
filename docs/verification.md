@@ -1,6 +1,8 @@
 # Verification
 
-Last verified on 2026-07-10 against OpenCode CLI 1.17.15.
+Last verified on 2026-08-16 against OpenCode CLI 1.18.16 (Node v25.9.0, npm 11.12.1,
+macOS). Every entry below must carry its own date and CLI version: the previous
+record sat undated against CLI 1.17.15 for five weeks while the installed CLI moved on.
 
 ## Release matrix
 
@@ -25,6 +27,23 @@ Results:
 - OpenCode CLI smoke passed `--version`, `--help`, and the `run`, `providers`, `models`, and `import` help probes.
 - Built-in, Dong-skills source, and installed collaboration Skills passed the current quick validator.
 - Both repositories passed `git diff --check`.
+
+## 0.2.0 — 2026-08-16 (OpenCode CLI 1.18.16, Node v25.9.0, macOS)
+
+- `npm test`: 31 files, 228 tests passed.
+- `npm run check`: build, typecheck, unit suite, repository plugin validation, and the
+  MCP smoke (11 tools) passed.
+- `npm run test:integration`: background lifecycle, workspace roots, tool contract,
+  and tool-call budget suites passed against the built `dist/`.
+- CI: `.github/workflows/pull-request-ci.yml` runs `npm run check` and
+  `npm run test:integration` on ubuntu-latest and macos-latest for pull requests and
+  `release/**` pushes. Before this the repository had no CI at all and every gate ran
+  by hand on one macOS machine.
+- Release gate: `npm run validate:plugin` fails when a tagged commit (or
+  `OPENCODE_PLUGIN_RELEASE=1`) carries the local `+codex.<timestamp>` cachebuster.
+- Live OpenCode CLI smokes (`npm run smoke:opencode-cli`, `npm run smoke:background`,
+  `npm run smoke:live-transfer`) are not part of this record: they call the real CLI
+  and provider, and this release was verified without spending provider quota.
 
 ## TDD evidence
 

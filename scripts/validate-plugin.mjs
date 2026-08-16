@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { readFileSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { resolve, join } from "node:path";
+import { releaseVersionIssues } from "./lib/release-version.mjs";
 
 const root = resolve("plugins/opencode-plugin-codex");
 const manifestPath = join(root, ".codex-plugin", "plugin.json");
@@ -36,29 +38,27 @@ for (const field of ["name", "version", "description", "skills", "mcpServers"]) 
   requireString(manifest, field);
 }
 if (manifest.name !== "opencode-plugin-codex") errors.push("plugin name must be opencode-plugin-codex");
-if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(manifest.version ?? "")) {
-  errors.push("plugin version must be semver");
+/** Tags pointing at HEAD: a release commit is one that is about to be tagged. */
+function tagsPointingAtHead() {
+  try {
+    return execFileSync("git", ["tag", "--points-at", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] })
+      .split("\n")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
 }
-// The manifest may carry a local cachebuster (`+codex.<timestamp>`, see docs/development.md
-// "Refreshing an installed plugin"), but the release core it advertises must be the version
-// that was actually built, or a caller cannot pin the tool contract by version.
+
 const packageVersion = readJson(resolve("package.json")).version;
-const manifestReleaseVersion = (manifest.version ?? "").split("+")[0];
-if (manifestReleaseVersion !== packageVersion) {
-  errors.push(
-    `plugin.json version ${manifest.version} advertises release ${manifestReleaseVersion || "(none)"}, ` +
-      `but the built code is package.json ${packageVersion}`
-  );
-}
-const buildMetadata = (manifest.version ?? "").split("+")[1];
-if (buildMetadata !== undefined && !/^codex\.\d{8,}$/.test(buildMetadata)) {
-  errors.push(`plugin version build metadata must be a codex cachebuster (+codex.<timestamp>), got +${buildMetadata}`);
-}
-if (buildMetadata !== undefined) {
-  console.warn(
-    `Note: plugin.json carries the local cachebuster +${buildMetadata}; drop it before cutting a release tag.`
-  );
-}
+const versionIssues = releaseVersionIssues({
+  manifestVersion: manifest.version,
+  packageVersion,
+  releaseTags: tagsPointingAtHead(),
+  releaseEnv: process.env.OPENCODE_PLUGIN_RELEASE
+});
+errors.push(...versionIssues.errors);
+for (const warning of versionIssues.warnings) console.warn(warning);
 if (manifest.skills !== "./skills/") errors.push("skills must point to ./skills/");
 if (manifest.mcpServers !== "./.mcp.json") errors.push("mcpServers must point to ./.mcp.json");
 if (!manifest.interface?.defaultPrompt?.length) errors.push("interface.defaultPrompt is required");

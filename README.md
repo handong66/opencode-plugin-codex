@@ -27,11 +27,17 @@ Important parameters and boundaries:
 - `cwd` must resolve inside a filesystem root supplied by the MCP client through standard roots or current Codex per-call workspace metadata. `files` accepts at most 32 existing regular files whose real paths stay inside `cwd`; outside paths and escaping symlinks are rejected.
 - Configure a nonstandard OpenCode executable in the trusted MCP environment with `OPENCODE_BIN`. Tools do not expose a caller-controlled binary path.
 - `opencode_run` defaults to background mode. `timeoutMs` applies to foreground and background work, accepts `10000..86400000`, and defaults to `600000`. Foreground calls are clamped to `240000` because Codex aborts a `tools/call` at 300s; longer budgets require background mode. A clamp, or a budget below the recorded p90 for that job kind, is reported in `warnings[]` and never refuses the call.
-- `autoApprovePermissions` maps to current OpenCode `--auto`, which auto-approves permission prompts not explicitly denied. It does not allow Codex private paths. `allowCodexPrivatePaths` is a separate explicit boundary. `dangerouslySkipPermissions` remains a deprecated alias for `autoApprovePermissions` only.
+- `maxToolCalls` (`opencode_run`, `opencode_rescue`, `opencode_review`, `opencode_adversarial_review`) bounds investigation rather than wall time. Reaching it does not kill the job: the background worker asks the same OpenCode session for its final answer and records `toolBudgetReached: true`. It is enforced in background mode only.
+- `autoApprovePermissions` maps to current OpenCode `--auto`, which auto-approves permission prompts not explicitly denied, and is available on `opencode_run`, `opencode_continue`, and `opencode_rescue`. The two review tools do not accept it because they are read-only and `--auto` also approves writes. It does not allow Codex private paths. `allowCodexPrivatePaths` is a separate explicit boundary. `dangerouslySkipPermissions` remains a deprecated alias for `autoApprovePermissions` only.
+- A foreground call returns the last `20000` characters of each stream (captured at `100000`) with `stdoutTruncated`/`stderrTruncated`; the complete buffers still feed `outputSummary`.
 - Background state is stored in the user's private state area (normally `~/.local/state/opencode-plugin-codex`). Directories use mode `0700`; job, input, and log files use `0600`.
 - Status/result/cancel use only the returned `jobId`. An independent worker owns the OpenCode process, timeout, bounded logs, cancellation, and terminal state so MCP restarts do not lose control.
 
 Only `outputSummary.resultComplete === true` is a finished OpenCode answer. Running, queued, cancelled, failed, JSONL-error, truncated, or succeeded-without-final-text results are partial evidence. Codex must verify every accepted finding against current files and commands.
+
+`outputSummary.finalText` carries that answer in full (bounded at `32000`, with `finalTextTruncated`), so the stdout tail is evidence rather than the answer. The summary also reports what the run did — `toolCallCount`, `filesInspected`, `turnsUsed`, `skillsLoaded[]`, `evidenceLevel`, `permissionDenied`/`deniedPaths` — and a `review` or `adversarial_review` that made zero tool calls is reported as `resultComplete: false` with a warning; it is an opinion, not a review.
+
+On `opencode_status`, `opencode_result`, and `opencode_cancel`, `ok` describes the **job's** outcome, not the query's: a `failed` or `cancelled` job returns `ok: false` with `error: { code, message, retryable }`. `terminal` and `nextAction` say whether the record can still change. Read results from MCP `structuredContent`: a payload above `8192` characters is not duplicated into the text block.
 
 ## Transfer privacy
 

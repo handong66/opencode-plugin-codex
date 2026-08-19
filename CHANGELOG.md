@@ -3,6 +3,28 @@
 Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to the
 2026-08-16 Grok/OpenCode plugin collaboration audit.
 
+## 0.2.3 — 2026-08-19
+
+### Fixed
+
+- Restored the 0.1-era compatibility behavior in which an explicit absolute `cwd`
+  is accepted as a workspace root. OpenCode tools therefore work when Codex supplies
+  neither standard MCP roots nor per-call workspace metadata, including bare
+  `codex exec --ephemeral` tasks, without requiring `OPENCODE_WORKSPACE_ROOTS`.
+- Calls that omit `cwd` keep the 0.2.2 discovery chain: standard roots, current
+  Codex request metadata, matching persisted-session cwd, and configured roots.
+
+### Security and diagnostics
+
+- Accepting an explicit `cwd` is an intentional capability tradeoff: an MCP caller
+  can ask OpenCode to run in any existing directory accessible to the plugin's OS
+  user. The plugin still requires an absolute path resolving to a directory, keeps
+  every attachment realpath-contained inside that directory, and retains the Codex
+  private-path prompt guard.
+- `opencode_check.data.workspaceSources.callerCwd` reports only whether a caller cwd
+  was provided, syntactically accepted, and counted. Invalid values use the path-free
+  diagnostic `invalid_caller_cwd`; no path is returned.
+
 ## 0.2.2 — 2026-08-19
 
 ### Fixed

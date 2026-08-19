@@ -1,4 +1,4 @@
-# Failure routing and polling contract (0.2.2)
+# Failure routing and polling contract (0.2.3)
 
 This file ships with the plugin, so it is version-bound to the code that implements
 it. It carries only contract facts: which code means what, which field is the
@@ -29,8 +29,8 @@ Returned, never thrown. All are `retryable: false` except `cli_probe_timeout`.
 
 | `code` | What to do |
 | --- | --- |
-| `workspace_unavailable` | No usable standard, request-metadata, persisted-session, or configured workspace root. For an ephemeral task, set `OPENCODE_WORKSPACE_ROOTS` before starting Codex. `opencode_check` still returns CLI and model diagnostics; execution tools stay refused. Do not fall back to a raw CLI call. |
-| `workspace_out_of_bounds` | The message lists the roots that are available. A new worktree is rejected until it is added to the Codex workspace. |
+| `workspace_unavailable` | No explicit absolute `cwd` and no usable standard, request-metadata, persisted-session, or configured workspace root. In an ephemeral task, pass the project as absolute `cwd`. `opencode_check` still returns CLI and model diagnostics; execution tools stay refused. Do not fall back to a raw CLI call. |
+| `workspace_out_of_bounds` | An internally resolved default or protected path is outside the available roots. An explicit absolute `cwd` authorizes its own resolved directory; do not use this error to reject that compatibility path. |
 | `file_attachment_invalid` | Attachments must resolve inside `cwd`. Copy the file in, or inline its contents in `prompt`. |
 | `private_path_blocked` | The prompt referenced a Codex private path. `details.hits` gives the offset and a masked preview; edit that span. |
 | `rollout_invalid` | The rollout file is missing, not JSONL, or outside the allowed roots. |
@@ -60,6 +60,7 @@ message.
 | `unsupported_root_protocol` | A returned root used a protocol other than `file:`. |
 | `provider_failed` | The installed server-side roots provider threw before returning its structured diagnostic. |
 | `invalid_configured_roots` | `OPENCODE_WORKSPACE_ROOTS` was empty after splitting, relative, oversized, or contained more than 32 entries. |
+| `invalid_caller_cwd` | The supplied `cwd` was not an absolute string of at most 4096 characters. No path is returned. |
 
 ## Job failure classes
 

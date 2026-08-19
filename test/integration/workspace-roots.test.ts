@@ -109,7 +109,8 @@ describe("installed MCP workspace roots", () => {
         turnMetadataType: "missing",
         parseSucceeded: false,
         workspaceCount: 0
-      }
+      },
+      callerCwd: { provided: true, ok: true, count: 1 }
     });
   });
 
@@ -189,7 +190,98 @@ describe("installed MCP workspace roots", () => {
         turnMetadataType: "string",
         parseSucceeded: true,
         workspaceCount: 1
-      }
+      },
+      callerCwd: { provided: true, ok: true, count: 1 }
+    });
+  });
+
+  test("uses an explicit absolute cwd when every Codex workspace source is empty", async () => {
+    const { client, workspace } = await workspaceClient({
+      name: "opencode-plugin-cache-caller-cwd",
+      roots: async () => ({ roots: [] })
+    });
+
+    const body = responseJson(
+      await client.callTool({
+        name: "opencode_check",
+        arguments: { cwd: workspace, includeModels: false },
+        _meta: { "x-codex-turn-metadata": { workspaces: {} } }
+      })
+    );
+
+    expect(body.data.workspace).toEqual({ ok: true, cwd: workspace });
+    expect(body.data.workspaceSources).toEqual({
+      rootsList: { supported: true, ok: true, count: 0 },
+      requestMeta: {
+        metaPresent: true,
+        turnMetadataPresent: true,
+        turnMetadataType: "object",
+        parseSucceeded: true,
+        workspaceCount: 0
+      },
+      callerCwd: { provided: true, ok: true, count: 1 }
+    });
+  });
+
+  test("starts opencode_run from an explicit cwd when every Codex workspace source is empty", async () => {
+    const script = [
+      "#!/usr/bin/env node",
+      "if (process.argv[2] === '--version') { console.log('1.17.15'); process.exit(0); }",
+      "if (process.argv[2] === 'run') {",
+      "  process.stdin.resume();",
+      "  process.stdin.on('end', () => {",
+      "    console.log(JSON.stringify({ type: 'step_start', sessionID: 'ses_caller_cwd', part: { type: 'step-start' } }));",
+      "    console.log(JSON.stringify({ type: 'text', sessionID: 'ses_caller_cwd', part: { type: 'text', text: 'caller cwd accepted' } }));",
+      "    console.log(JSON.stringify({ type: 'step_finish', sessionID: 'ses_caller_cwd', part: { type: 'step-finish', reason: 'stop' } }));",
+      "  });",
+      "}"
+    ].join("\n");
+    const { client, workspace } = await workspaceClient({
+      name: "opencode-plugin-cache-caller-cwd-run",
+      roots: async () => ({ roots: [] }),
+      script
+    });
+
+    const body = responseJson(
+      await client.callTool({
+        name: "opencode_run",
+        arguments: {
+          cwd: workspace,
+          background: false,
+          prompt: "prove explicit cwd reaches OpenCode"
+        },
+        _meta: { "x-codex-turn-metadata": { workspaces: {} } }
+      })
+    );
+
+    expect(body.ok).toBe(true);
+    expect(body.error).toBeUndefined();
+    expect(body.data.outputSummary).toMatchObject({
+      resultComplete: true,
+      finalText: "caller cwd accepted"
+    });
+  });
+
+  test("does not accept a relative caller cwd as a workspace root", async () => {
+    const { client } = await workspaceClient({
+      name: "opencode-plugin-cache-relative-caller-cwd",
+      roots: async () => ({ roots: [] })
+    });
+
+    const body = responseJson(
+      await client.callTool({
+        name: "opencode_check",
+        arguments: { cwd: "relative-private-marker", includeModels: false },
+        _meta: { "x-codex-turn-metadata": { workspaces: {} } }
+      })
+    );
+
+    expect(body.data.workspace.error.code).toBe("workspace_unavailable");
+    expect(body.data.workspaceSources.callerCwd).toEqual({
+      provided: true,
+      ok: false,
+      count: 0,
+      errorCode: "invalid_caller_cwd"
     });
   });
 

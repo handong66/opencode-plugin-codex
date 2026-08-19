@@ -24,7 +24,7 @@ Both files are tracked release artifacts and must be regenerated after source ch
 
 ### Foreground
 
-1. Resolve `cwd` inside a trusted filesystem root supplied by standard MCP roots, current Codex per-call workspace metadata, a matching persisted current-thread rollout, or explicit `OPENCODE_WORKSPACE_ROOTS`; accept metadata as either a decoded object or a bounded JSON string, refresh standard roots for each call because a client may change them, and never treat the plugin cache process directory or the tool's own `cwd` argument as a project root.
+1. When the caller supplies an absolute `cwd`, accept its resolved existing directory as the workspace root. Otherwise resolve a default from standard MCP roots, current Codex per-call workspace metadata, a matching persisted current-thread rollout, or explicit `OPENCODE_WORKSPACE_ROOTS`; accept metadata as either a decoded object or a bounded JSON string, refresh standard roots for each call because a client may change them, and never treat the plugin cache process directory as a project root.
 2. Resolve every attachment with `realpath`; require an in-`cwd` regular file.
 3. Discover OpenCode from trusted server environment/common paths.
 4. Build argument-array flags. Send the prompt through stdin.
@@ -65,7 +65,8 @@ sources. `rootsList` returns only `supported`, `ok`, `count`, and a normalized
 parse success, and the accepted workspace count. `sessionMeta` reports only thread-ID
 presence, rollout/cwd presence, and accepted count. `configuredRoots` reports only
 configuration presence, validity, accepted count, and `invalid_configured_roots`.
-Never add thread IDs, environment values, URIs, paths, raw metadata, rollout contents,
+`callerCwd` reports only presence, syntactic acceptance, accepted count, and
+`invalid_caller_cwd`. Never add thread IDs, environment values, URIs, paths, raw metadata, rollout contents,
 or client error messages to this object.
 
 `ok` reports the **job's** outcome on `opencode_status` / `opencode_result` / `opencode_cancel`, not the query's: a `failed` or `cancelled` job answers `ok: false` with a typed `error`. `terminal: true` means the record is final and `nextAction` says to stop polling.
@@ -74,8 +75,8 @@ or client error messages to this object.
 
 | Code | Retryable | Raised when |
 | --- | --- | --- |
-| `workspace_unavailable` | no | no usable MCP, Codex-session, or configured workspace root |
-| `workspace_out_of_bounds` | no | `cwd` resolves outside every available root; the message lists the roots and explains that Codex supplies them per call |
+| `workspace_unavailable` | no | no explicit absolute `cwd` and no usable MCP, Codex-session, or configured workspace root |
+| `workspace_out_of_bounds` | no | an internally resolved default or protected path resolves outside every available root |
 | `file_attachment_invalid` | no | an attachment is missing, not a regular file, or resolves outside `cwd`; the message names the remedy |
 | `private_path_blocked` | no | the prompt references a Codex private path without `allowCodexPrivatePaths`; the error carries the offset and a masked preview |
 | `rollout_invalid` | no | a transfer rollout is unreadable or outside the allowed directories |
@@ -129,7 +130,7 @@ All child environments remove names beginning with `CODEX_`. Do not remove provi
 
 ## Path boundaries
 
-- `cwd`: existing directory inside a trusted workspace after `realpath`. Standard MCP roots are preferred; current Codex `x-codex-turn-metadata.workspaces`, the matching persisted rollout `session_meta.cwd`, and `OPENCODE_WORKSPACE_ROOTS` are fallbacks because plugin MCP processes start in their installed cache. The configured value uses the platform path delimiter and accepts at most 32 absolute paths. The turn-metadata value may already be an object or may be a JSON string of at most 1,000,000 characters; malformed JSON and non-object values contribute no roots.
+- `cwd`: an explicit absolute path authorizes its own existing directory after `realpath`. This restores compatibility with clients that send neither MCP roots nor workspace metadata and intentionally gives the MCP caller access to every directory the plugin's OS user can access. When omitted, standard MCP roots are preferred; current Codex `x-codex-turn-metadata.workspaces`, the matching persisted rollout `session_meta.cwd`, and `OPENCODE_WORKSPACE_ROOTS` are fallbacks because plugin MCP processes start in their installed cache. The configured value uses the platform path delimiter and accepts at most 32 absolute paths. The turn-metadata value may already be an object or may be a JSON string of at most 1,000,000 characters; malformed JSON and non-object values contribute no roots.
 - `files`: at most 32 existing regular files inside resolved `cwd`; escaping symlinks fail.
 - explicit `rolloutFile`: JSONL inside resolved `cwd` or the resolved Codex sessions directory.
 - `jobId`: strict identifier used against central state; status/result/cancel do not accept `cwd`.

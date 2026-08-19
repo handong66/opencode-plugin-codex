@@ -77,9 +77,17 @@ export type WorkspaceConfiguredRootsDiagnostics = {
   errorCode?: string;
 };
 
+export type WorkspaceCallerCwdDiagnostics = {
+  provided: boolean;
+  ok: boolean;
+  count: number;
+  errorCode?: string;
+};
+
 export type WorkspaceAdditionalSourcesDiagnostics = {
   sessionMeta?: WorkspaceSessionMetaDiagnostics;
   configuredRoots?: WorkspaceConfiguredRootsDiagnostics;
+  callerCwd?: WorkspaceCallerCwdDiagnostics;
 };
 
 export type WorkspaceSourcesDiagnostics = {
@@ -159,10 +167,9 @@ async function resolvedWorkspaceRootsContext(
   if (!workspaceRoots.length) {
     throw workspaceUnavailable(
       "No trusted filesystem workspace root is available. " +
-        "Codex may provide roots/list, per-call workspace metadata, or a persisted current-thread cwd; " +
-        "OPENCODE_WORKSPACE_ROOTS is the explicit fallback for ephemeral sessions. opencode_check reports which " +
-        "source was absent or unusable. It still returns CLI and effective-model diagnostics in this state; " +
-        "execution tools do not run.",
+        "Provide an explicit absolute cwd, standard roots/list, per-call workspace metadata, a persisted " +
+        "current-thread cwd, or OPENCODE_WORKSPACE_ROOTS. opencode_check reports which source was absent or " +
+        "unusable. It still returns CLI and effective-model diagnostics in this state; execution tools do not run.",
       { workspaceSources: sources }
     );
   }

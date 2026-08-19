@@ -21,6 +21,7 @@ import {
   opencodeStatus,
   opencodeTransfer,
   type WorkspaceAdditionalSourcesDiagnostics,
+  type WorkspaceCallerCwdDiagnostics,
   type WorkspaceConfiguredRootsDiagnostics,
   type WorkspaceRequestMetaDiagnostics,
   type WorkspaceRootsListDiagnostics,
@@ -32,7 +33,7 @@ const server = new McpServer(
     name: "opencode-plugin-codex",
     // Keep in step with package.json and .codex-plugin/plugin.json; test/version-sync.test.ts
     // fails the build when they drift, because this string is the version a caller sees on the wire.
-    version: "0.2.2"
+    version: "0.2.3"
   },
   {
     instructions:
@@ -245,6 +246,23 @@ function configuredWorkspaceContext(): {
   };
 }
 
+function callerCwdWorkspaceContext(value: unknown): {
+  roots: string[];
+  diagnostics?: WorkspaceCallerCwdDiagnostics;
+} {
+  if (value === undefined) return { roots: [] };
+  const ok = typeof value === "string" && value.length <= 4_096 && isAbsolute(value);
+  return {
+    roots: ok ? [value] : [],
+    diagnostics: {
+      provided: true,
+      ok,
+      count: ok ? 1 : 0,
+      ...(ok ? {} : { errorCode: "invalid_caller_cwd" })
+    }
+  };
+}
+
 async function withCodexWorkspaceRoots<T extends Record<string, unknown>>(
   args: T,
   meta: unknown
@@ -258,19 +276,21 @@ async function withCodexWorkspaceRoots<T extends Record<string, unknown>>(
   const context = codexWorkspaceContext(meta);
   const session = await codexSessionWorkspaceContext(meta);
   const configured = configuredWorkspaceContext();
+  const callerCwd = callerCwdWorkspaceContext(args.cwd);
   return {
     ...args,
-    _workspaceRoots: [...context.roots, ...session.roots, ...configured.roots],
+    _workspaceRoots: [...context.roots, ...session.roots, ...configured.roots, ...callerCwd.roots],
     _workspaceRequestMeta: context.diagnostics,
     _workspaceAdditionalSources: {
       ...(session.diagnostics ? { sessionMeta: session.diagnostics } : {}),
-      ...(configured.diagnostics ? { configuredRoots: configured.diagnostics } : {})
+      ...(configured.diagnostics ? { configuredRoots: configured.diagnostics } : {}),
+      ...(callerCwd.diagnostics ? { callerCwd: callerCwd.diagnostics } : {})
     }
   };
 }
 
 const commonShape = {
-  cwd: z.string().min(1).max(4_096).optional().describe("Working directory inside the MCP server workspace. Defaults to the workspace root."),
+  cwd: z.string().min(1).max(4_096).optional().describe("Absolute working directory. When supplied, its resolved directory is accepted as the workspace root. Defaults to another available workspace root."),
   model: z
     .string()
     .min(1)

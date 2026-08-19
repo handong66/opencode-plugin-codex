@@ -17,6 +17,34 @@ uv run --with PyYAML python "$HOME/.codex/skills/.system/skill-creator/scripts/q
 git diff --check
 ```
 
+### 0.2.3 — 2026-08-19 (Codex CLI 0.144.1, OpenCode CLI 1.18.16, Node v25.9.0, macOS)
+
+- TDD boundary proof: the new bare-ephemeral cases first failed with
+  `workspace_unavailable`; after the compatibility change, the focused workspace suite
+  passed 16/16. It covers `opencode_check`, a real fake-CLI `opencode_run` launch, and
+  path-free rejection of a relative caller cwd.
+- `npm audit --audit-level=low`: 0 vulnerabilities.
+- `npm run check`: build and typecheck passed; 33 files and 276 tests passed;
+  repository plugin validation passed; MCP smoke listed 11 tools.
+- `npm run test:integration`: 4 files and 28 tests passed against the built `dist/`.
+- `npm run smoke:opencode-cli` passed all six CLI/help probes, and
+  `npm run smoke:background` passed its detached-worker lifecycle case.
+- The current plugin-creator validator and skill quick validator passed in an
+  isolated `uv` environment containing PyYAML; `git diff --check` passed.
+- The Git marketplace upgraded from commit `7920533`; `codex plugin add` and
+  `codex plugin list` both reported installed version 0.2.3.
+- Fresh bare ephemeral Codex process, non-Git directory, with
+  `OPENCODE_WORKSPACE_ROOTS` removed: standard roots count 0, request metadata
+  workspace count 0, no persisted rollout cwd, caller cwd count 1, and
+  `opencode_check.data.workspace.ok` was true.
+- The same isolated configuration launched a real background `opencode_run` through
+  the installed plugin. Its terminal record was `succeeded`,
+  `outputSummary.resultComplete` was true, and `finalText` was
+  `OPENCODE_CWD_COMPAT_OK`. The noninteractive Codex harness used its documented
+  approval-bypass automation flag so the write-capable MCP call would not be
+  cancelled for lack of an interactive approver; OpenCode was instructed to use no
+  tools and ran in an empty temporary directory.
+
 ### 0.2.2 — 2026-08-19 (Codex CLI 0.144.1, OpenCode CLI 1.18.16, Node v25.9.0, macOS)
 
 - `npm audit --audit-level=low`: 0 vulnerabilities after refreshing compatible

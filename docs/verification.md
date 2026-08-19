@@ -1,6 +1,6 @@
 # Verification
 
-Last verified on 2026-08-16 against OpenCode CLI 1.18.16 (Node v25.9.0, npm 11.12.1,
+Last verified on 2026-08-19 against OpenCode CLI 1.18.16 (Node v25.9.0, npm 11.12.1,
 macOS). Every entry below must carry its own date and CLI version: the previous
 record sat undated against CLI 1.17.15 for five weeks while the installed CLI moved on.
 
@@ -12,10 +12,33 @@ npm run check
 npm run test:integration
 npm run smoke:opencode-cli
 npm run smoke:background
-python3 "$HOME/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py" plugins/opencode-plugin-codex
-python3 "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" plugins/opencode-plugin-codex/skills/opencode
+uv run --with PyYAML python "$HOME/.codex/skills/.system/plugin-creator/scripts/validate_plugin.py" plugins/opencode-plugin-codex
+uv run --with PyYAML python "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" plugins/opencode-plugin-codex/skills/opencode
 git diff --check
 ```
+
+### 0.2.2 — 2026-08-19 (Codex CLI 0.144.1, OpenCode CLI 1.18.16, Node v25.9.0, macOS)
+
+- `npm audit --audit-level=low`: 0 vulnerabilities after refreshing compatible
+  transitive versions in the lockfile.
+- `npm run check`: build and typecheck passed; 33 files and 273 tests passed;
+  repository plugin validation passed; MCP smoke listed 11 tools.
+- `npm run test:integration`: 4 files and 25 tests passed against the built `dist/`.
+  The workspace suite contributed 13 passing cases, including persisted-session cwd,
+  configured ephemeral roots, and path-free rejection of malformed configured roots.
+- `npm run smoke:opencode-cli` passed all six CLI/help probes, and
+  `npm run smoke:background` passed its real detached-worker lifecycle case.
+- The current plugin-creator validator and skill quick validator passed in an
+  isolated `uv` environment containing PyYAML; `git diff --check` passed.
+- Fresh Codex process, non-Git directory: standard roots count 0 and request metadata
+  workspace count 0; the matching persisted rollout supplied one session root and
+  `opencode_check.data.workspace.ok` was true.
+- Fresh ephemeral Codex process, non-Git directory: standard roots count 0, request
+  metadata workspace count 0, and no rollout cwd; one explicit
+  `OPENCODE_WORKSPACE_ROOTS` entry was accepted and workspace status was true.
+- The Git marketplace upgraded cleanly after commit `a9392ba`; `codex plugin add`
+  reported installed version 0.2.2, and both `codex plugin list` and the cached manifest
+  independently reported 0.2.2.
 
 ### 0.2.0 — 2026-08-16 (OpenCode CLI 1.18.16, Node v25.9.0, macOS)
 
@@ -52,7 +75,7 @@ git diff --check
 
 ## TDD evidence
 
-The regression suite was observed RED before each behavior fix. Reproduced failures included job-ID traversal, hidden transfer text, prompt text in argv, workspace/file escapes, caller-controlled executables, ignored background timeout, leaked `CODEX_*` variables, incomplete JSONL treated as final, exit-zero JSONL errors, unverified imports, continuation partial-success loss, unbounded output, stale workers, missing live partial logs, stdin delivery loss, cancellation overwritten by a stale worker write, an installed MCP process mistaking its plugin-cache cwd for the Codex project root, current Codex returning an empty standard roots list despite carrying per-call workspace metadata, and stale standard roots after a same-connection workspace change. Each targeted test passed after the minimal implementation, then the full matrix passed.
+The regression suite was observed RED before each behavior fix. Reproduced failures included job-ID traversal, hidden transfer text, prompt text in argv, workspace/file escapes, caller-controlled executables, ignored background timeout, leaked `CODEX_*` variables, incomplete JSONL treated as final, exit-zero JSONL errors, unverified imports, continuation partial-success loss, unbounded output, stale workers, missing live partial logs, stdin delivery loss, cancellation overwritten by a stale worker write, an installed MCP process mistaking its plugin-cache cwd for the Codex project root, current Codex returning an empty standard roots list despite carrying per-call workspace metadata, both current Codex workspace sources being empty despite a matching persisted task cwd, and stale standard roots after a same-connection workspace change. Each targeted test passed after the minimal implementation, then the full matrix passed.
 
 ## Runtime smoke
 
@@ -75,20 +98,19 @@ Final workspace-boundary review job `job_1783679182891_59f757d2` also completed 
 
 Background jobs run in an independent worker with private central state. A new MCP process can use the original `jobId` for status, result, and cancellation. `timeoutMs` is enforced by the worker, with one published exception: a job that reaches `maxToolCalls` runs a final-answer pass with a 30000ms floor and can therefore finish up to 30s late. Missing workers reconcile to `worker_unavailable`; a terminal record can no longer be overwritten by a write that started earlier; cancellation has durable precedence over stale worker writes; and prompt input is removed after it is read. Only `outputSummary.resultComplete === true` is a final OpenCode conclusion.
 
-## Installed plugin pickup — run this before publishing
+## Installed plugin pickup — run before announcing a release
 
 Everything above was verified from the repository checkout. This step is the one
 gate the repository cannot run for itself: it proves that what an installed cache
 serves is what was built here. **Do not publish a release until it has passed and
 been recorded below.**
 
-From the repository root:
+For a Git marketplace, after the release commit reaches the remote default branch:
 
 ```bash
-npm run check                       # leaves dist/ matching src/; git status must be empty
-python3 "$HOME/.codex/skills/.system/plugin-creator/scripts/update_plugin_cachebuster.py" plugins/opencode-plugin-codex
-python3 "$HOME/.codex/skills/.system/plugin-creator/scripts/read_marketplace_name.py"
-codex plugin add opencode-plugin-codex@<marketplace-name>   # 0.1.0 used @opencode-plugin-codex
+codex plugin marketplace upgrade opencode-plugin-codex --json
+codex plugin add opencode-plugin-codex@opencode-plugin-codex --json
+codex plugin list
 ```
 
 Then open a **new** Codex task — an existing task keeps the MCP server it started,
@@ -111,3 +133,6 @@ the tool count each time. A run that is not recorded here did not happen.
 - 2026-07-10: fresh Codex CLI task `019f4b94-5975-7b23-a2a3-9848c0826361` passed against installed cache `0.1.0+codex.20260710103034`, OpenCode CLI 1.17.15, 10 tools.
 - 0.2.0: **not yet run.** This release was verified from the repository only. Run the
   steps above before publishing and add the result here.
+- 2026-08-19: the refreshed Git marketplace and installed cache both reported 0.2.2;
+  fresh persisted and ephemeral Codex CLI tasks passed the zero-roots cases recorded in
+  the 0.2.2 release matrix above, against OpenCode CLI 1.18.16 and the 11-tool server.

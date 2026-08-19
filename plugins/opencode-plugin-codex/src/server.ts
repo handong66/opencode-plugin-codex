@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
@@ -17,7 +18,10 @@ import {
   opencodeRun,
   opencodeSessions,
   opencodeStatus,
-  opencodeTransfer
+  opencodeTransfer,
+  type WorkspaceRequestMetaDiagnostics,
+  type WorkspaceRootsListDiagnostics,
+  type WorkspaceRootsProviderResult
 } from "./tools.js";
 
 const server = new McpServer(
@@ -25,7 +29,7 @@ const server = new McpServer(
     name: "opencode-plugin-codex",
     // Keep in step with package.json and .codex-plugin/plugin.json; test/version-sync.test.ts
     // fails the build when they drift, because this string is the version a caller sees on the wire.
-    version: "0.2.0"
+    version: "0.2.1"
   },
   {
     instructions:
@@ -33,32 +37,169 @@ const server = new McpServer(
   }
 );
 
-configureWorkspaceRootsProvider(async () => {
-  return await server.server
-    .listRoots()
-    .then(({ roots }) =>
-      roots.flatMap((root) => {
-        const url = new URL(root.uri);
-        return url.protocol === "file:" ? [fileURLToPath(url)] : [];
-      })
-    )
-    .catch(() => []);
+function normalizedRootsListError(error: unknown): string {
+  const issues =
+    error && typeof error === "object" && "issues" in error && Array.isArray(error.issues)
+      ? error.issues
+      : [];
+  const rejectedNonFileRoot = issues.some((issue) => {
+    if (!issue || typeof issue !== "object") return false;
+    const record = issue as Record<string, unknown>;
+    const path = Array.isArray(record.path) ? record.path : [];
+    return record.format === "starts_with" && record.prefix === "file://" && path.at(-1) === "uri";
+  });
+  if (rejectedNonFileRoot) return "unsupported_root_protocol";
+  const code =
+    error && typeof error === "object" && "code" in error && typeof error.code === "number"
+      ? error.code
+      : undefined;
+  switch (code) {
+    case ErrorCode.MethodNotFound:
+      return "method_not_found";
+    case ErrorCode.RequestTimeout:
+      return "request_timeout";
+    case ErrorCode.ParseError:
+      return "parse_error";
+    case ErrorCode.InvalidRequest:
+      return "invalid_request";
+    case ErrorCode.InvalidParams:
+      return "invalid_params";
+    case ErrorCode.InternalError:
+      return "internal_error";
+    default:
+      return "request_failed";
+  }
+}
+
+configureWorkspaceRootsProvider(async (): Promise<WorkspaceRootsProviderResult> => {
+  const advertised = server.server.getClientCapabilities()?.roots !== undefined;
+  try {
+    const { roots } = await server.server.listRoots();
+    const filesystemRoots: string[] = [];
+    for (const root of roots) {
+      let url: URL;
+      try {
+        url = new URL(root.uri);
+      } catch {
+        return {
+          roots: [],
+          diagnostics: {
+            supported: true,
+            ok: false,
+            count: 0,
+            errorCode: "invalid_root_uri"
+          }
+        };
+      }
+      if (url.protocol !== "file:") {
+        return {
+          roots: [],
+          diagnostics: {
+            supported: true,
+            ok: false,
+            count: 0,
+            errorCode: "unsupported_root_protocol"
+          }
+        };
+      }
+      try {
+        filesystemRoots.push(fileURLToPath(url));
+      } catch {
+        return {
+          roots: [],
+          diagnostics: {
+            supported: true,
+            ok: false,
+            count: 0,
+            errorCode: "invalid_root_uri"
+          }
+        };
+      }
+    }
+    return {
+      roots: filesystemRoots,
+      diagnostics: { supported: true, ok: true, count: filesystemRoots.length }
+    };
+  } catch (error) {
+    const errorCode = normalizedRootsListError(error);
+    const diagnostics: WorkspaceRootsListDiagnostics = {
+      supported: advertised || errorCode !== "method_not_found",
+      ok: false,
+      count: 0,
+      errorCode
+    };
+    return { roots: [], diagnostics };
+  }
 });
 
-function codexWorkspaceRoots(meta: unknown): string[] {
-  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return [];
-  const turnMetadata = (meta as Record<string, unknown>)["x-codex-turn-metadata"];
-  if (!turnMetadata || typeof turnMetadata !== "object" || Array.isArray(turnMetadata)) return [];
-  const workspaces = (turnMetadata as Record<string, unknown>).workspaces;
-  if (!workspaces || typeof workspaces !== "object" || Array.isArray(workspaces)) return [];
-  return Object.keys(workspaces).filter((root) => root.length <= 4_096 && isAbsolute(root));
+const MAX_CODEX_TURN_METADATA_STRING_CHARS = 1_000_000;
+const MISSING_VALUE_TYPE = "missing";
+const NULL_VALUE_TYPE = "null";
+const ARRAY_VALUE_TYPE = "array";
+
+function valueType(value: unknown): string {
+  if (value === undefined) return MISSING_VALUE_TYPE;
+  if (value === null) return NULL_VALUE_TYPE;
+  if (Array.isArray(value)) return ARRAY_VALUE_TYPE;
+  return typeof value;
+}
+
+function decodeRecord(value: unknown): Record<string, unknown> | null {
+  // Codex's own app-tools bridge accepts this metadata as either an object or a JSON
+  // string. Plugin MCP calls can cross the same executor boundary, so mirror that
+  // compatibility instead of silently discarding a serialized workspace map.
+  let decoded = value;
+  if (typeof value === "string") {
+    if (value.length > MAX_CODEX_TURN_METADATA_STRING_CHARS) return null;
+    try {
+      decoded = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  return decoded && typeof decoded === "object" && !Array.isArray(decoded)
+    ? (decoded as Record<string, unknown>)
+    : null;
+}
+
+function codexWorkspaceContext(meta: unknown): {
+  roots: string[];
+  diagnostics: WorkspaceRequestMetaDiagnostics;
+} {
+  const metaPresent = meta !== undefined && meta !== null;
+  const decodedMeta = decodeRecord(meta);
+  const turnMetadataPresent = Boolean(
+    decodedMeta && Object.prototype.hasOwnProperty.call(decodedMeta, "x-codex-turn-metadata")
+  );
+  const turnMetadata = decodedMeta?.["x-codex-turn-metadata"];
+  const decodedTurnMetadata = decodeRecord(turnMetadata);
+  const workspaces = decodedTurnMetadata?.workspaces;
+  const roots =
+    workspaces && typeof workspaces === "object" && !Array.isArray(workspaces)
+      ? Object.keys(workspaces).filter((root) => root.length <= 4_096 && isAbsolute(root))
+      : [];
+  return {
+    roots,
+    diagnostics: {
+      metaPresent,
+      turnMetadataPresent,
+      turnMetadataType: valueType(turnMetadata),
+      parseSucceeded: decodedTurnMetadata !== null,
+      workspaceCount: roots.length
+    }
+  };
 }
 
 function withCodexWorkspaceRoots<T extends Record<string, unknown>>(
   args: T,
   meta: unknown
-): T & { _workspaceRoots: string[] } {
-  return { ...args, _workspaceRoots: codexWorkspaceRoots(meta) };
+): T & { _workspaceRoots: string[]; _workspaceRequestMeta: WorkspaceRequestMetaDiagnostics } {
+  const context = codexWorkspaceContext(meta);
+  return {
+    ...args,
+    _workspaceRoots: context.roots,
+    _workspaceRequestMeta: context.diagnostics
+  };
 }
 
 const commonShape = {

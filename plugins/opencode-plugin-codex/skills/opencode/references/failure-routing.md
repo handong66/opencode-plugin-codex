@@ -1,4 +1,4 @@
-# Failure routing and polling contract (0.2.0)
+# Failure routing and polling contract (0.2.1)
 
 This file ships with the plugin, so it is version-bound to the code that implements
 it. It carries only contract facts: which code means what, which field is the
@@ -39,6 +39,25 @@ Returned, never thrown. All are `retryable: false` except `cli_probe_timeout`.
 | `cli_probe_timeout` | A candidate binary existed but never answered `--version`. Retryable. |
 | `job_not_found` | No record under that job id: it belongs to another machine or state directory, or it is gone. Stop polling it. `opencode_sessions` lists sessions this workspace can resume with `opencode_continue`. |
 | `model_not_found` | Also raised before submission when an explicit provider id differs only in case from an enumerated lowercase id. |
+
+## Workspace-source diagnostic codes
+
+These values occur only in `opencode_check.data.workspaceSources.rootsList.errorCode`;
+they are not envelope errors and do not make `opencode_check.ok` false. The diagnostic
+contains no URI, path, raw metadata, or client error message.
+
+| `errorCode` | Meaning |
+| --- | --- |
+| `method_not_found` | The client did not implement `roots/list`; `supported` is false unless it advertised the capability anyway. |
+| `request_timeout` | The `roots/list` request did not answer before the MCP SDK deadline. |
+| `parse_error` | The client returned malformed JSON-RPC data. |
+| `invalid_request` | The client rejected the roots request as invalid. |
+| `invalid_params` | The client rejected the roots request parameters. |
+| `internal_error` | The client reported an internal roots-handler failure. |
+| `request_failed` | The roots request failed without a recognized MCP error code. |
+| `invalid_root_uri` | A returned root was not a usable local file URL. |
+| `unsupported_root_protocol` | A returned root used a protocol other than `file:`. |
+| `provider_failed` | The installed server-side roots provider threw before returning its structured diagnostic. |
 
 ## Job failure classes
 

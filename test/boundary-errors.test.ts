@@ -105,6 +105,10 @@ describe("opencode_check degrades instead of failing whole", () => {
         ok: boolean;
         version?: string;
         workspace: { ok: boolean; error?: { code: string; retryable: boolean } };
+        workspaceSources?: {
+          rootsList: { supported: boolean; ok: boolean; count: number; errorCode?: string };
+          requestMeta: { workspaceCount: number };
+        };
         effectiveModel?: { model?: string };
         providersRaw?: string;
         warnings: string[];
@@ -116,6 +120,16 @@ describe("opencode_check degrades instead of failing whole", () => {
       expect(response.version).toBe("1.18.16");
       expect(response.workspace.ok).toBe(false);
       expect(response.workspace.error?.code).toBe("workspace_unavailable");
+      expect(response.workspaceSources).toEqual({
+        rootsList: { supported: true, ok: true, count: 0 },
+        requestMeta: {
+          metaPresent: false,
+          turnMetadataPresent: false,
+          turnMetadataType: "missing",
+          parseSucceeded: false,
+          workspaceCount: 0
+        }
+      });
       expect(response.effectiveModel?.model).toBe("aihubmix/claude-opus-4-6");
       // Provider listing needs a workspace; it is skipped, not faked.
       expect(response.providersRaw).toBeUndefined();

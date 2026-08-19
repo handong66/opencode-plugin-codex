@@ -24,7 +24,7 @@ Both files are tracked release artifacts and must be regenerated after source ch
 
 ### Foreground
 
-1. Resolve `cwd` inside a filesystem root supplied by standard MCP roots or current Codex per-call workspace metadata; refresh standard roots for each call because a client may change them, and never treat the plugin cache process directory as a project root.
+1. Resolve `cwd` inside a filesystem root supplied by standard MCP roots or current Codex per-call workspace metadata; accept the metadata as either a decoded object or a bounded JSON string, refresh standard roots for each call because a client may change them, and never treat the plugin cache process directory as a project root.
 2. Resolve every attachment with `realpath`; require an in-`cwd` regular file.
 3. Discover OpenCode from trusted server environment/common paths.
 4. Build argument-array flags. Send the prompt through stdin.
@@ -57,7 +57,13 @@ Since 0.2.0 every tool returns one shape:
 { "ok": true, "error": { "code": "…", "message": "…", "retryable": false }, "warnings": [], "data": { } }
 ```
 
-`data` carries the payload — `job`, `record`, `stdout`, `stderr`, `outputSummary`, `workspace`, `effectiveModel`, `continuation`. Cheap scalars (`terminal`, `nextAction`, `waited`, `resumable`, `openCodeSessionId`, `errorClass`, `exitCode`, `maxChars`, `maxCharsClamped`, `view`, `modelSelection`, `background`, `importSucceeded`) are also mirrored at the top level for the transition. Bulk fields are deliberately not mirrored: duplicating them is what OX2 removed, and the text copy of a payload above 8192 characters is replaced by a one-line `structuredContentOnly` notice so the same bytes never travel twice.
+`data` carries the payload — `job`, `record`, `stdout`, `stderr`, `outputSummary`, `workspace`, `workspaceSources`, `effectiveModel`, `continuation`. Cheap scalars (`terminal`, `nextAction`, `waited`, `resumable`, `openCodeSessionId`, `errorClass`, `exitCode`, `maxChars`, `maxCharsClamped`, `view`, `modelSelection`, `background`, `importSucceeded`) are also mirrored at the top level for the transition. Bulk fields are deliberately not mirrored: duplicating them is what OX2 removed, and the text copy of a payload above 8192 characters is replaced by a one-line `structuredContentOnly` notice so the same bytes never travel twice.
+
+`opencode_check.data.workspaceSources` is the path-free diagnostic for the two trusted
+workspace sources. `rootsList` returns only `supported`, `ok`, `count`, and a normalized
+`errorCode`; `requestMeta` returns only metadata presence, turn-metadata presence/type,
+parse success, and the accepted workspace count. Never add URIs, paths, raw metadata,
+or client error messages to this object.
 
 `ok` reports the **job's** outcome on `opencode_status` / `opencode_result` / `opencode_cancel`, not the query's: a `failed` or `cancelled` job answers `ok: false` with a typed `error`. `terminal: true` means the record is final and `nextAction` says to stop polling.
 
@@ -120,7 +126,7 @@ All child environments remove names beginning with `CODEX_`. Do not remove provi
 
 ## Path boundaries
 
-- `cwd`: existing directory inside the MCP workspace after `realpath`. Standard MCP roots are preferred; current Codex `x-codex-turn-metadata.workspaces` is the fallback because plugin MCP processes start in their installed cache.
+- `cwd`: existing directory inside the MCP workspace after `realpath`. Standard MCP roots are preferred; current Codex `x-codex-turn-metadata.workspaces` is the fallback because plugin MCP processes start in their installed cache. The turn-metadata value may already be an object or may be a JSON string of at most 1,000,000 characters; malformed JSON and non-object values contribute no roots.
 - `files`: at most 32 existing regular files inside resolved `cwd`; escaping symlinks fail.
 - explicit `rolloutFile`: JSONL inside resolved `cwd` or the resolved Codex sessions directory.
 - `jobId`: strict identifier used against central state; status/result/cancel do not accept `cwd`.

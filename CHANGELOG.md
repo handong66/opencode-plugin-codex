@@ -3,6 +3,29 @@
 Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to the
 2026-08-16 Grok/OpenCode plugin collaboration audit.
 
+## 0.2.1 — 2026-08-19
+
+### Fixed
+
+- Codex workspace roots carried in `x-codex-turn-metadata` now work when the metadata
+  value is either the decoded object used by existing clients or a bounded JSON string
+  used by other Codex App/CLI builds. Before this fix, a serialized value was discarded,
+  so `opencode_check` reported `workspace_unavailable` and every execution tool refused
+  before OpenCode started even though the Codex task had an attached workspace.
+- The compatibility parser rejects malformed JSON, arrays, null, and strings above
+  1,000,000 characters. It still accepts only absolute workspace keys of at most 4096
+  characters, and an explicit tool `cwd` never becomes a trusted root by itself.
+
+### Diagnostics
+
+- `opencode_check.data.workspaceSources` now reports path-free `rootsList` and
+  `requestMeta` summaries. Callers can distinguish an unsupported, empty, or failed
+  `roots/list` request from missing, malformed, or successfully decoded Codex metadata
+  without returning root paths, raw metadata, or client error messages.
+- The fail-closed boundary is unchanged: no usable trusted root remains
+  `workspace_unavailable`, and a `cwd` outside all supplied roots remains
+  `workspace_out_of_bounds`.
+
 ## 0.2.0 — 2026-08-16
 
 ### Contract

@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -15,6 +15,14 @@ import { afterEach, describe, expect, test } from "vitest";
 const tempDirs: string[] = [];
 const clients: Client[] = [];
 
+function isolatedPluginEnv(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.CODEX_THREAD_ID;
+  delete env.CODEX_HOME;
+  delete env.OPENCODE_WORKSPACE_ROOTS;
+  return { ...env, ...overrides };
+}
+
 type ToolResponse = Awaited<ReturnType<Client["callTool"]>>;
 
 function responseJson(response: ToolResponse): Record<string, any> {
@@ -27,6 +35,7 @@ async function workspaceClient(options: {
   capabilities?: ClientCapabilities;
   roots?: () => Promise<{ roots: Array<{ uri: string; name?: string }> }>;
   script?: string;
+  env?: Record<string, string>;
 }): Promise<{ client: Client; workspace: string }> {
   const pluginCache = await mkdtemp(join(tmpdir(), `${options.name}-`));
   tempDirs.push(pluginCache);
@@ -44,7 +53,7 @@ async function workspaceClient(options: {
     command: process.execPath,
     args: [join(workspace, "plugins/opencode-plugin-codex/dist/server.js")],
     cwd: pluginCache,
-    env: { ...process.env, OPENCODE_BIN: bin },
+    env: isolatedPluginEnv({ ...options.env, OPENCODE_BIN: bin }),
     stderr: "pipe"
   });
   await client.connect(transport);
@@ -77,7 +86,7 @@ describe("installed MCP workspace roots", () => {
       command: process.execPath,
       args: [join(workspace, "plugins/opencode-plugin-codex/dist/server.js")],
       cwd: pluginCache,
-      env: { ...process.env, OPENCODE_BIN: bin },
+      env: isolatedPluginEnv({ OPENCODE_BIN: bin }),
       stderr: "pipe"
     });
     await client.connect(transport);
@@ -121,7 +130,7 @@ describe("installed MCP workspace roots", () => {
       command: process.execPath,
       args: [join(workspace, "plugins/opencode-plugin-codex/dist/server.js")],
       cwd: pluginCache,
-      env: { ...process.env, OPENCODE_BIN: bin },
+      env: isolatedPluginEnv({ OPENCODE_BIN: bin }),
       stderr: "pipe"
     });
     await client.connect(transport);
@@ -182,6 +191,99 @@ describe("installed MCP workspace roots", () => {
         workspaceCount: 1
       }
     });
+  });
+
+  test("uses the current Codex rollout cwd when both client workspace sources are empty", async () => {
+    const threadId = "019f0a50-66bb-7d02-aee9-6bc03108a603";
+    const codexHome = await mkdtemp(join(tmpdir(), "opencode-plugin-codex-home-"));
+    const sessionsDir = join(codexHome, "sessions", "2026", "08", "19");
+    tempDirs.push(codexHome);
+    await mkdir(sessionsDir, { recursive: true });
+    await writeFile(
+      join(sessionsDir, `rollout-${threadId}.jsonl`),
+      [
+        JSON.stringify({
+          type: "session_meta",
+          payload: { id: "different-thread", cwd: codexHome }
+        }),
+        JSON.stringify({
+          type: "session_meta",
+          payload: { id: threadId, cwd: process.cwd() }
+        })
+      ].join("\n") + "\n"
+    );
+    const { client, workspace } = await workspaceClient({
+      name: "opencode-plugin-cache-session-cwd",
+      roots: async () => ({ roots: [] }),
+      env: { CODEX_HOME: codexHome, CODEX_THREAD_ID: threadId }
+    });
+
+    const body = responseJson(
+      await client.callTool({
+        name: "opencode_check",
+        arguments: { cwd: workspace, includeModels: false },
+        _meta: {
+          threadId,
+          "x-codex-turn-metadata": { workspaces: {} }
+        }
+      })
+    );
+
+    expect(body.data.workspace).toEqual({ ok: true, cwd: workspace });
+    expect(body.data.workspaceSources.sessionMeta).toEqual({
+      threadIdPresent: true,
+      rolloutFound: true,
+      cwdPresent: true,
+      count: 1
+    });
+  });
+
+  test("uses explicitly configured workspace roots when Codex supplies none", async () => {
+    const { client, workspace } = await workspaceClient({
+      name: "opencode-plugin-cache-configured-roots",
+      roots: async () => ({ roots: [] }),
+      env: { OPENCODE_WORKSPACE_ROOTS: process.cwd() }
+    });
+
+    const body = responseJson(
+      await client.callTool({
+        name: "opencode_check",
+        arguments: { cwd: workspace, includeModels: false },
+        _meta: { "x-codex-turn-metadata": { workspaces: {} } }
+      })
+    );
+
+    expect(body.data.workspace).toEqual({ ok: true, cwd: workspace });
+    expect(body.data.workspaceSources.configuredRoots).toEqual({
+      configured: true,
+      ok: true,
+      count: 1
+    });
+  });
+
+  test("rejects malformed configured roots without echoing their value", async () => {
+    const { client } = await workspaceClient({
+      name: "opencode-plugin-cache-invalid-configured-roots",
+      roots: async () => ({ roots: [] }),
+      env: { OPENCODE_WORKSPACE_ROOTS: "private-marker-relative" }
+    });
+
+    const body = responseJson(
+      await client.callTool({
+        name: "opencode_check",
+        arguments: { includeModels: false },
+        _meta: { "x-codex-turn-metadata": { workspaces: {} } }
+      })
+    );
+
+    expect(body.data.workspace.error.code).toBe("workspace_unavailable");
+    expect(body.data.workspaceSources.configuredRoots).toEqual({
+      configured: true,
+      ok: false,
+      count: 0,
+      errorCode: "invalid_configured_roots"
+    });
+    expect(JSON.stringify(body)).not.toContain("private-marker-relative");
   });
 
   test("starts opencode_run with JSON-string metadata instead of refusing before launch", async () => {
@@ -403,7 +505,7 @@ describe("installed MCP workspace roots", () => {
       command: process.execPath,
       args: [join(sourceWorkspace, "plugins/opencode-plugin-codex/dist/server.js")],
       cwd: pluginCache,
-      env: { ...process.env, OPENCODE_BIN: bin },
+      env: isolatedPluginEnv({ OPENCODE_BIN: bin }),
       stderr: "pipe"
     });
     await client.connect(transport);

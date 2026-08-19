@@ -2,10 +2,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { ErrorCode } from "@modelcontextprotocol/sdk/types.js";
-import { isAbsolute } from "node:path";
+import { delimiter, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { timeoutSchema, TYPICAL_WALL_TIME_NOTE } from "./timeout-budget.js";
+import { findCodexRolloutWorkspace } from "./codex-rollout.js";
 import {
   configureWorkspaceRootsProvider,
   opencodeAdversarialReview,
@@ -19,6 +20,8 @@ import {
   opencodeSessions,
   opencodeStatus,
   opencodeTransfer,
+  type WorkspaceAdditionalSourcesDiagnostics,
+  type WorkspaceConfiguredRootsDiagnostics,
   type WorkspaceRequestMetaDiagnostics,
   type WorkspaceRootsListDiagnostics,
   type WorkspaceRootsProviderResult
@@ -29,7 +32,7 @@ const server = new McpServer(
     name: "opencode-plugin-codex",
     // Keep in step with package.json and .codex-plugin/plugin.json; test/version-sync.test.ts
     // fails the build when they drift, because this string is the version a caller sees on the wire.
-    version: "0.2.1"
+    version: "0.2.2"
   },
   {
     instructions:
@@ -190,15 +193,79 @@ function codexWorkspaceContext(meta: unknown): {
   };
 }
 
-function withCodexWorkspaceRoots<T extends Record<string, unknown>>(
+const THREAD_ID_PATTERN = /^[A-Za-z0-9-]{1,128}$/;
+const MAX_CONFIGURED_WORKSPACE_ROOTS = 32;
+
+async function codexSessionWorkspaceContext(meta: unknown): Promise<{
+  roots: string[];
+  diagnostics?: WorkspaceAdditionalSourcesDiagnostics["sessionMeta"];
+}> {
+  const decodedMeta = decodeRecord(meta);
+  const metadataThreadId = decodedMeta?.threadId;
+  const candidate =
+    typeof metadataThreadId === "string" && THREAD_ID_PATTERN.test(metadataThreadId)
+      ? metadataThreadId
+      : process.env.CODEX_THREAD_ID;
+  const threadId = candidate && THREAD_ID_PATTERN.test(candidate) ? candidate : undefined;
+  if (!threadId) return { roots: [] };
+
+  const workspace = await findCodexRolloutWorkspace({ threadId });
+  const roots = workspace.cwd && isAbsolute(workspace.cwd) ? [workspace.cwd] : [];
+  return {
+    roots,
+    diagnostics: {
+      threadIdPresent: true,
+      rolloutFound: workspace.rolloutFound,
+      cwdPresent: workspace.cwd !== null,
+      count: roots.length
+    }
+  };
+}
+
+function configuredWorkspaceContext(): {
+  roots: string[];
+  diagnostics?: WorkspaceConfiguredRootsDiagnostics;
+} {
+  const raw = process.env.OPENCODE_WORKSPACE_ROOTS;
+  if (raw === undefined || raw.trim() === "") return { roots: [] };
+
+  const roots = raw.split(delimiter).filter((root) => root.length > 0);
+  const ok =
+    roots.length > 0 &&
+    roots.length <= MAX_CONFIGURED_WORKSPACE_ROOTS &&
+    roots.every((root) => root.length <= 4_096 && isAbsolute(root));
+  return {
+    roots: ok ? roots : [],
+    diagnostics: {
+      configured: true,
+      ok,
+      count: ok ? roots.length : 0,
+      ...(ok ? {} : { errorCode: "invalid_configured_roots" })
+    }
+  };
+}
+
+async function withCodexWorkspaceRoots<T extends Record<string, unknown>>(
   args: T,
   meta: unknown
-): T & { _workspaceRoots: string[]; _workspaceRequestMeta: WorkspaceRequestMetaDiagnostics } {
+): Promise<
+  T & {
+    _workspaceRoots: string[];
+    _workspaceRequestMeta: WorkspaceRequestMetaDiagnostics;
+    _workspaceAdditionalSources: WorkspaceAdditionalSourcesDiagnostics;
+  }
+> {
   const context = codexWorkspaceContext(meta);
+  const session = await codexSessionWorkspaceContext(meta);
+  const configured = configuredWorkspaceContext();
   return {
     ...args,
-    _workspaceRoots: context.roots,
-    _workspaceRequestMeta: context.diagnostics
+    _workspaceRoots: [...context.roots, ...session.roots, ...configured.roots],
+    _workspaceRequestMeta: context.diagnostics,
+    _workspaceAdditionalSources: {
+      ...(session.diagnostics ? { sessionMeta: session.diagnostics } : {}),
+      ...(configured.diagnostics ? { configuredRoots: configured.diagnostics } : {})
+    }
   };
 }
 
@@ -308,7 +375,7 @@ server.registerTool(
     },
     annotations: READ_ONLY_ANNOTATIONS
   },
-  (args, extra) => opencodeCheck(withCodexWorkspaceRoots(args, extra._meta))
+  async (args, extra) => opencodeCheck(await withCodexWorkspaceRoots(args, extra._meta))
 );
 
 server.registerTool(
@@ -340,7 +407,7 @@ server.registerTool(
       dangerouslySkipPermissions: z.boolean().optional().describe("Deprecated compatibility alias for autoApprovePermissions. Does not allow Codex private paths.")
     }
   },
-  (args, extra) => opencodeRun(withCodexWorkspaceRoots(args, extra._meta))
+  async (args, extra) => opencodeRun(await withCodexWorkspaceRoots(args, extra._meta))
 );
 
 server.registerTool(
@@ -360,7 +427,7 @@ server.registerTool(
       autoApprovePermissions: autoApprovePermissionsSchema
     }
   },
-  (args, extra) => opencodeContinue(withCodexWorkspaceRoots(args, extra._meta))
+  async (args, extra) => opencodeContinue(await withCodexWorkspaceRoots(args, extra._meta))
 );
 
 server.registerTool(
@@ -381,7 +448,7 @@ server.registerTool(
       autoApprovePermissions: autoApprovePermissionsSchema
     }
   },
-  (args, extra) => opencodeRescue(withCodexWorkspaceRoots(args, extra._meta))
+  async (args, extra) => opencodeRescue(await withCodexWorkspaceRoots(args, extra._meta))
 );
 
 server.registerTool(
@@ -399,7 +466,7 @@ server.registerTool(
       maxToolCalls: maxToolCallsSchema
     }
   },
-  (args, extra) => opencodeReview(withCodexWorkspaceRoots(args, extra._meta))
+  async (args, extra) => opencodeReview(await withCodexWorkspaceRoots(args, extra._meta))
 );
 
 server.registerTool(
@@ -429,7 +496,7 @@ server.registerTool(
       maxToolCalls: maxToolCallsSchema
     }
   },
-  (args, extra) => opencodeAdversarialReview(withCodexWorkspaceRoots(args, extra._meta))
+  async (args, extra) => opencodeAdversarialReview(await withCodexWorkspaceRoots(args, extra._meta))
 );
 
 server.registerTool(
@@ -455,7 +522,7 @@ server.registerTool(
       keepTempFile: z.boolean().optional()
     }
   },
-  (args, extra) => opencodeTransfer(withCodexWorkspaceRoots(args, extra._meta))
+  async (args, extra) => opencodeTransfer(await withCodexWorkspaceRoots(args, extra._meta))
 );
 
 server.registerTool(
@@ -484,7 +551,7 @@ server.registerTool(
     },
     annotations: READ_ONLY_ANNOTATIONS
   },
-  (args, extra) => opencodeSessions(withCodexWorkspaceRoots(args, extra._meta))
+  async (args, extra) => opencodeSessions(await withCodexWorkspaceRoots(args, extra._meta))
 );
 
 server.registerTool(

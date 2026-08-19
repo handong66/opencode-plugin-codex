@@ -10,6 +10,7 @@
       ],
       "env_vars": [
         "OPENCODE_BIN",
+        "OPENCODE_WORKSPACE_ROOTS",
         "CODEX_THREAD_ID",
         "CODEX_HOME",
         "HOME",

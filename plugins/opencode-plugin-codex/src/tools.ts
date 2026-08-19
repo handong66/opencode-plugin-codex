@@ -44,6 +44,8 @@ export type CommonArgs = {
   _workspaceRoots?: string[];
   /** Path-free description of how the per-call metadata was decoded. */
   _workspaceRequestMeta?: WorkspaceRequestMetaDiagnostics;
+  /** Path-free diagnostics for trusted roots recovered outside the two MCP client sources. */
+  _workspaceAdditionalSources?: WorkspaceAdditionalSourcesDiagnostics;
 };
 
 export type WorkspaceRootsListDiagnostics = {
@@ -61,10 +63,29 @@ export type WorkspaceRequestMetaDiagnostics = {
   workspaceCount: number;
 };
 
+export type WorkspaceSessionMetaDiagnostics = {
+  threadIdPresent: boolean;
+  rolloutFound: boolean;
+  cwdPresent: boolean;
+  count: number;
+};
+
+export type WorkspaceConfiguredRootsDiagnostics = {
+  configured: boolean;
+  ok: boolean;
+  count: number;
+  errorCode?: string;
+};
+
+export type WorkspaceAdditionalSourcesDiagnostics = {
+  sessionMeta?: WorkspaceSessionMetaDiagnostics;
+  configuredRoots?: WorkspaceConfiguredRootsDiagnostics;
+};
+
 export type WorkspaceSourcesDiagnostics = {
   rootsList: WorkspaceRootsListDiagnostics;
   requestMeta: WorkspaceRequestMetaDiagnostics;
-};
+} & WorkspaceAdditionalSourcesDiagnostics;
 
 export type WorkspaceRootsProviderResult = {
   roots: string[];
@@ -104,7 +125,8 @@ function normalizeWorkspaceRootsProviderResult(
 
 async function resolvedWorkspaceRootsContext(
   requestWorkspaceRoots: string[] = [],
-  requestMeta: WorkspaceRequestMetaDiagnostics = MISSING_REQUEST_META
+  requestMeta: WorkspaceRequestMetaDiagnostics = MISSING_REQUEST_META,
+  additionalSources: WorkspaceAdditionalSourcesDiagnostics = {}
 ): Promise<{ roots: string[]; sources: WorkspaceSourcesDiagnostics }> {
   const standard = await workspaceRootsProvider()
     .then(normalizeWorkspaceRootsProviderResult)
@@ -112,7 +134,7 @@ async function resolvedWorkspaceRootsContext(
       roots: [],
       diagnostics: { supported: true, ok: false, count: 0, errorCode: "provider_failed" }
     }));
-  const sources = { rootsList: standard.diagnostics, requestMeta };
+  const sources = { rootsList: standard.diagnostics, requestMeta, ...additionalSources };
   const providedRoots = [...new Set([...standard.roots, ...requestWorkspaceRoots])];
   // Deliberately still Promise.all and still fail-closed: no recorded event ever hit
   // a root realpath failure, and loosening a boundary for a hypothetical is a bad
@@ -136,9 +158,11 @@ async function resolvedWorkspaceRootsContext(
   );
   if (!workspaceRoots.length) {
     throw workspaceUnavailable(
-      "The MCP client did not provide a filesystem workspace root. " +
-        "Codex may provide roots/list or per-call workspace metadata; opencode_check reports which source was absent " +
-        "or unusable. It still returns CLI and effective-model diagnostics in this state; execution tools do not run.",
+      "No trusted filesystem workspace root is available. " +
+        "Codex may provide roots/list, per-call workspace metadata, or a persisted current-thread cwd; " +
+        "OPENCODE_WORKSPACE_ROOTS is the explicit fallback for ephemeral sessions. opencode_check reports which " +
+        "source was absent or unusable. It still returns CLI and effective-model diagnostics in this state; " +
+        "execution tools do not run.",
       { workspaceSources: sources }
     );
   }
@@ -147,9 +171,10 @@ async function resolvedWorkspaceRootsContext(
 
 async function resolvedWorkspaceRoots(
   requestWorkspaceRoots: string[] = [],
-  requestMeta: WorkspaceRequestMetaDiagnostics = MISSING_REQUEST_META
+  requestMeta: WorkspaceRequestMetaDiagnostics = MISSING_REQUEST_META,
+  additionalSources: WorkspaceAdditionalSourcesDiagnostics = {}
 ): Promise<string[]> {
-  return (await resolvedWorkspaceRootsContext(requestWorkspaceRoots, requestMeta)).roots;
+  return (await resolvedWorkspaceRootsContext(requestWorkspaceRoots, requestMeta, additionalSources)).roots;
 }
 
 async function cwdWithinWorkspace(cwd: string | undefined, workspaceRoots: string[]): Promise<string> {
@@ -179,9 +204,14 @@ async function cwdWithinWorkspace(cwd: string | undefined, workspaceRoots: strin
 async function cwdOrDefault(
   cwd?: string,
   requestWorkspaceRoots: string[] = [],
-  requestMeta: WorkspaceRequestMetaDiagnostics = MISSING_REQUEST_META
+  requestMeta: WorkspaceRequestMetaDiagnostics = MISSING_REQUEST_META,
+  additionalSources: WorkspaceAdditionalSourcesDiagnostics = {}
 ): Promise<string> {
-  const context = await resolvedWorkspaceRootsContext(requestWorkspaceRoots, requestMeta);
+  const context = await resolvedWorkspaceRootsContext(
+    requestWorkspaceRoots,
+    requestMeta,
+    additionalSources
+  );
   return cwdWithinWorkspace(cwd, context.roots);
 }
 
@@ -572,6 +602,7 @@ async function runOrStartJob(params: {
   cwd?: string;
   _workspaceRoots?: string[];
   _workspaceRequestMeta?: WorkspaceRequestMetaDiagnostics;
+  _workspaceAdditionalSources?: WorkspaceAdditionalSourcesDiagnostics;
   model?: string;
   agent?: string;
   sessionId?: string;
@@ -586,7 +617,12 @@ async function runOrStartJob(params: {
   allowCodexPrivatePaths?: boolean;
   dangerouslySkipPermissions?: boolean;
 }) {
-  const cwd = await cwdOrDefault(params.cwd, params._workspaceRoots, params._workspaceRequestMeta);
+  const cwd = await cwdOrDefault(
+    params.cwd,
+    params._workspaceRoots,
+    params._workspaceRequestMeta,
+    params._workspaceAdditionalSources
+  );
   validatePromptBoundary(params.prompt, params.allowCodexPrivatePaths);
   await validateFileAttachments(params.files, cwd);
   const args = buildRunArgs({ ...params, cwd });
@@ -727,7 +763,11 @@ async function opencodeCheckImpl(
   // fail-closed and still refuse.
   let cwd: string | undefined;
   try {
-    const context = await resolvedWorkspaceRootsContext(args._workspaceRoots, args._workspaceRequestMeta);
+    const context = await resolvedWorkspaceRootsContext(
+      args._workspaceRoots,
+      args._workspaceRequestMeta,
+      args._workspaceAdditionalSources
+    );
     data.workspaceSources = context.sources;
     cwd = await cwdWithinWorkspace(args.cwd, context.roots);
     data.workspace = { ok: true, cwd };
@@ -1060,7 +1100,12 @@ function continuationError(
 }
 
 async function opencodeTransferImpl(args: TransferArgs) {
-  const cwd = await cwdOrDefault(args.cwd, args._workspaceRoots, args._workspaceRequestMeta);
+  const cwd = await cwdOrDefault(
+    args.cwd,
+    args._workspaceRoots,
+    args._workspaceRequestMeta,
+    args._workspaceAdditionalSources
+  );
   const warnings: string[] = [];
   const requestedRolloutFile = args.rolloutFile ?? (await findCodexRolloutFile({ threadId: args.threadId }));
   const rolloutFile = requestedRolloutFile ? await validateRolloutFile(requestedRolloutFile, cwd) : null;
@@ -1330,8 +1375,17 @@ export async function opencodeSessions(args: CommonArgs & { limit?: number; incl
 }
 
 async function opencodeSessionsImpl(args: CommonArgs & { limit?: number; includeAllDirectories?: boolean }) {
-  const roots = await resolvedWorkspaceRoots(args._workspaceRoots, args._workspaceRequestMeta);
-  const cwd = await cwdOrDefault(args.cwd, args._workspaceRoots, args._workspaceRequestMeta);
+  const roots = await resolvedWorkspaceRoots(
+    args._workspaceRoots,
+    args._workspaceRequestMeta,
+    args._workspaceAdditionalSources
+  );
+  const cwd = await cwdOrDefault(
+    args.cwd,
+    args._workspaceRoots,
+    args._workspaceRequestMeta,
+    args._workspaceAdditionalSources
+  );
   const limit = Math.min(Math.max(args.limit ?? 20, 1), 100);
   const warnings: string[] = [];
 

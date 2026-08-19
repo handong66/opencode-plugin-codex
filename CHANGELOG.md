@@ -3,6 +3,32 @@
 Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to the
 2026-08-16 Grok/OpenCode plugin collaboration audit.
 
+## 0.2.2 — 2026-08-19
+
+### Fixed
+
+- A Codex task no longer depends exclusively on `roots/list` or Git-enriched
+  `x-codex-turn-metadata.workspaces`. When both are empty, the plugin can recover the
+  current persisted task's `session_meta.cwd` from the Codex-owned rollout selected by
+  the injected thread ID. The rollout payload ID must match that thread ID; another
+  session's cwd is never accepted.
+- Ephemeral tasks, which may have no persisted rollout, can set trusted
+  `OPENCODE_WORKSPACE_ROOTS`. The value is split with the platform path delimiter
+  (`:` on macOS/Linux, `;` on Windows), accepts at most 32 absolute paths of at most
+  4096 characters each, and is passed through the plugin MCP environment allowlist.
+
+### Security and diagnostics
+
+- An explicit tool `cwd` still never authorizes itself. Malformed configured roots,
+  missing/mismatched rollout metadata, unresolved paths, and out-of-root cwd values
+  remain fail-closed.
+- `opencode_check.data.workspaceSources` can now include path-free `sessionMeta` and
+  `configuredRoots` summaries in addition to `rootsList` and `requestMeta`. The new
+  diagnostics expose counts and normalized status only, never thread IDs, paths, raw
+  rollout data, or environment values.
+- Refreshed compatible transitive dependencies in the lockfile to versions with no
+  currently reported `npm audit` vulnerabilities.
+
 ## 0.2.1 — 2026-08-19
 
 ### Fixed

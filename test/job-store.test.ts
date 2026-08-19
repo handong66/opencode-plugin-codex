@@ -274,7 +274,10 @@ describe("JobStore background lifecycle", () => {
       cwd: process.cwd(),
       args: ["run", "--format", "json", "--dir", process.cwd()],
       prompt: "budget wall probe",
-      timeoutMs: 300,
+      // Leave enough startup headroom for the child Node process when the full
+      // Vitest suite is running in parallel; the assertion is about preserving
+      // an already-emitted session handle at the budget wall.
+      timeoutMs: 1_000,
       opencodeBin: bin
     });
     const terminal = await waitForTerminal(store, job.id, 20_000);
@@ -284,7 +287,7 @@ describe("JobStore background lifecycle", () => {
     expect(terminal.opencodeSessionId).toBe("ses_budget_wall");
     expect(terminal.resumable).toBe(true);
     expect(terminal.errorMessage).toContain("ses_budget_wall");
-    expect(terminal.errorMessage).toContain("timeoutMs=300");
+    expect(terminal.errorMessage).toContain("timeoutMs=1000");
 
     const { outputSummary } = await store.result(job.id);
     expect(outputSummary.guidance).toContain("opencode_continue");

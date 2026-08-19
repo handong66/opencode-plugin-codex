@@ -77,6 +77,9 @@ const server = mcp.mcpServers?.["opencode-plugin-codex"];
 if (!server) errors.push(".mcp.json must define opencode-plugin-codex server");
 if (server?.command !== "node") errors.push("MCP server command must be node");
 if (!server?.args?.includes("./dist/server.js")) errors.push("MCP server must launch ./dist/server.js");
+if (!server?.env_vars?.includes("OPENCODE_WORKSPACE_ROOTS")) {
+  errors.push("MCP server must pass OPENCODE_WORKSPACE_ROOTS to support explicit ephemeral workspace roots");
+}
 
 const skill = existsSync(skillPath) ? readFileSync(skillPath, "utf8") : "";
 if (!skill.startsWith("---\n")) errors.push("skill must start with YAML frontmatter");

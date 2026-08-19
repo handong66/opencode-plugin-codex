@@ -1,6 +1,6 @@
 {
   "name": "opencode-plugin-codex",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Use OpenCode from Codex, including Codex-thread transfer into OpenCode sessions.",
   "author": {
     "name": "handong66",

@@ -1,4 +1,4 @@
-# Failure routing and polling contract (0.2.1)
+# Failure routing and polling contract (0.2.2)
 
 This file ships with the plugin, so it is version-bound to the code that implements
 it. It carries only contract facts: which code means what, which field is the
@@ -29,7 +29,7 @@ Returned, never thrown. All are `retryable: false` except `cli_probe_timeout`.
 
 | `code` | What to do |
 | --- | --- |
-| `workspace_unavailable` | No usable workspace root. `opencode_check` still returns CLI and model diagnostics; execution tools stay refused. Do not fall back to a raw CLI call. |
+| `workspace_unavailable` | No usable standard, request-metadata, persisted-session, or configured workspace root. For an ephemeral task, set `OPENCODE_WORKSPACE_ROOTS` before starting Codex. `opencode_check` still returns CLI and model diagnostics; execution tools stay refused. Do not fall back to a raw CLI call. |
 | `workspace_out_of_bounds` | The message lists the roots that are available. A new worktree is rejected until it is added to the Codex workspace. |
 | `file_attachment_invalid` | Attachments must resolve inside `cwd`. Copy the file in, or inline its contents in `prompt`. |
 | `private_path_blocked` | The prompt referenced a Codex private path. `details.hits` gives the offset and a masked preview; edit that span. |
@@ -42,9 +42,10 @@ Returned, never thrown. All are `retryable: false` except `cli_probe_timeout`.
 
 ## Workspace-source diagnostic codes
 
-These values occur only in `opencode_check.data.workspaceSources.rootsList.errorCode`;
-they are not envelope errors and do not make `opencode_check.ok` false. The diagnostic
-contains no URI, path, raw metadata, or client error message.
+These values occur only in `opencode_check.data.workspaceSources`; they are not
+envelope errors and do not make `opencode_check.ok` false. The diagnostic contains no
+thread ID, environment value, URI, path, raw metadata, rollout content, or client error
+message.
 
 | `errorCode` | Meaning |
 | --- | --- |
@@ -58,6 +59,7 @@ contains no URI, path, raw metadata, or client error message.
 | `invalid_root_uri` | A returned root was not a usable local file URL. |
 | `unsupported_root_protocol` | A returned root used a protocol other than `file:`. |
 | `provider_failed` | The installed server-side roots provider threw before returning its structured diagnostic. |
+| `invalid_configured_roots` | `OPENCODE_WORKSPACE_ROOTS` was empty after splitting, relative, oversized, or contained more than 32 entries. |
 
 ## Job failure classes
 

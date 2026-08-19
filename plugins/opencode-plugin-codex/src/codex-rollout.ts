@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from "node:fs/promises";
+import { open, readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { TranscriptMessage, TranscriptRole } from "./types.js";
@@ -13,6 +13,13 @@ export type FindCodexRolloutOptions = {
   threadId?: string;
   codexHome?: string;
 };
+
+export type CodexRolloutWorkspace = {
+  rolloutFound: boolean;
+  cwd: string | null;
+};
+
+const SESSION_META_PREFIX_BYTES = 65_536;
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -144,4 +151,45 @@ export async function readCodexTranscriptFromRollout(
 ): Promise<TranscriptMessage[]> {
   const jsonl = await readFile(rolloutFile, "utf8");
   return parseCodexRolloutJsonl(jsonl, options);
+}
+
+export async function findCodexRolloutWorkspace(
+  options: FindCodexRolloutOptions = {}
+): Promise<CodexRolloutWorkspace> {
+  const threadId = options.threadId ?? process.env.CODEX_THREAD_ID;
+  if (!threadId || !/^[A-Za-z0-9-]{1,128}$/.test(threadId)) {
+    return { rolloutFound: false, cwd: null };
+  }
+
+  const rolloutFile = await findCodexRolloutFile({ ...options, threadId });
+  if (!rolloutFile) return { rolloutFound: false, cwd: null };
+
+  const handle = await open(rolloutFile, "r").catch(() => null);
+  if (!handle) return { rolloutFound: true, cwd: null };
+  let jsonl = "";
+  try {
+    const buffer = Buffer.alloc(SESSION_META_PREFIX_BYTES);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    jsonl = buffer.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    await handle.close();
+  }
+  for (const line of jsonl.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let record: JsonRecord;
+    try {
+      record = JSON.parse(line) as JsonRecord;
+    } catch {
+      continue;
+    }
+    if (record.type !== "session_meta" || !isRecord(record.payload)) continue;
+    if (record.payload.id !== threadId) continue;
+    const cwd = record.payload.cwd;
+    return {
+      rolloutFound: true,
+      cwd: typeof cwd === "string" && cwd.length <= 4_096 ? cwd : null
+    };
+  }
+
+  return { rolloutFound: true, cwd: null };
 }

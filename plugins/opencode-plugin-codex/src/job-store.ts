@@ -784,7 +784,11 @@ export class JobStore {
     modelSelection?: ModelSelection;
   }): Promise<JobRecord> {
     await this.ensure();
-    const discovered = await discoverOpenCode({ opencodeBin: params.opencodeBin, env: this.env });
+    const discovered = await discoverOpenCode({
+      opencodeBin: params.opencodeBin,
+      env: this.env,
+      cwd: params.cwd
+    });
     if (!discovered.ok || !discovered.bin) {
       throw discoveryFailure(discovered);
     }

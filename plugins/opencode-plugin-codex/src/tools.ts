@@ -594,7 +594,7 @@ async function resolveModelSelection(params: {
 }): Promise<{ modelSelection: ModelSelection; warnings: string[] }> {
   if (!params.model) return describeModelSelection({});
   assertKnownProviderSpelling(params.model);
-  const discovered = await discoverOpenCode({ opencodeBin: params.opencodeBin });
+  const discovered = await discoverOpenCode({ opencodeBin: params.opencodeBin, cwd: params.cwd });
   if (!discovered.ok || !discovered.bin) {
     // Discovery failure has its own error path; do not double-report it here.
     return describeModelSelection({ requested: params.model });
@@ -1144,7 +1144,7 @@ async function opencodeTransferImpl(args: TransferArgs) {
     });
   }
 
-  const discovered = await discoverOpenCode();
+  const discovered = await discoverOpenCode({ cwd });
   if (!discovered.ok || !discovered.bin) {
     const failure = discoveryFailure(discovered);
     return envelope({

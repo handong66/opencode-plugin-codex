@@ -1,7 +1,7 @@
 import { access } from "node:fs/promises";
 import { constants } from "node:fs";
 import { delimiter, join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import type { ProcessResult } from "./types.js";
 import { BoundaryError } from "./boundary.js";
@@ -11,6 +11,9 @@ export type DiscoverOpenCodeOptions = {
   env?: NodeJS.ProcessEnv;
   homeDir?: string;
   extraCandidates?: string[];
+  /** Live directory for version probes. Defaults to the OS temp directory so a
+   * long-lived MCP server never passes an unlinked plugin-cache cwd to the CLI. */
+  cwd?: string;
   /** Skip the process-lifetime memo and re-probe. */
   force?: boolean;
 };
@@ -229,7 +232,11 @@ async function readVersion(
   timeoutMs: number
 ): Promise<{ version?: string; error?: string; timedOut: boolean }> {
   try {
-    const result = await runProcess(candidate, ["--version"], { env: options.env, timeoutMs });
+    const result = await runProcess(candidate, ["--version"], {
+      cwd: options.cwd ?? tmpdir(),
+      env: options.env,
+      timeoutMs
+    });
     if (result.exitCode === 0) {
       return { version: result.stdout.trim() || result.stderr.trim(), timedOut: false };
     }

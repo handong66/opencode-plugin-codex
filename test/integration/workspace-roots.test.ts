@@ -67,6 +67,57 @@ afterEach(async () => {
 });
 
 describe("installed MCP workspace roots", () => {
+  test("keeps CLI discovery alive when the server cwd is deleted after startup", async () => {
+    const pluginCache = await mkdtemp(join(tmpdir(), "opencode-plugin-deleted-cwd-"));
+    const fakeHome = await mkdtemp(join(tmpdir(), "opencode-plugin-deleted-cwd-home-"));
+    tempDirs.push(pluginCache, fakeHome);
+    const binDir = join(fakeHome, ".opencode", "bin");
+    await mkdir(binDir, { recursive: true });
+    const bin = join(binDir, "opencode");
+    await writeFile(
+      bin,
+      [
+        `#!${process.execPath}`,
+        "process.cwd();",
+        "console.log('1.18.16');"
+      ].join("\n")
+    );
+    await chmod(bin, 0o755);
+
+    const workspace = process.cwd();
+    const client = new Client(
+      { name: "deleted-server-cwd-test", version: "0.1.0" },
+      { capabilities: { roots: {} } }
+    );
+    client.setRequestHandler(ListRootsRequestSchema, async () => ({
+      roots: [{ uri: pathToFileURL(workspace).href, name: "test-workspace" }]
+    }));
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [join(workspace, "plugins/opencode-plugin-codex/dist/server.js")],
+      cwd: pluginCache,
+      env: isolatedPluginEnv({ HOME: fakeHome, PATH: "" }),
+      stderr: "pipe"
+    });
+    await client.connect(transport);
+    clients.push(client);
+
+    // Plugin replacement removes the old versioned cache while already-open Codex
+    // tasks keep their MCP server alive. Every CLI probe must therefore choose a
+    // live cwd explicitly instead of inheriting this now-unlinked directory.
+    await rm(pluginCache, { recursive: true, force: true });
+
+    const response = await client.callTool({
+      name: "opencode_check",
+      arguments: { cwd: workspace, includeModels: false }
+    });
+    const body = responseJson(response);
+
+    expect(response.isError).not.toBe(true);
+    expect(body).toMatchObject({ ok: true, version: "1.18.16" });
+    expect(body.data.workspace).toEqual({ ok: true, cwd: workspace });
+  });
+
   test("accepts a Codex project root even when the server process cwd is the plugin cache", async () => {
     const pluginCache = await mkdtemp(join(tmpdir(), "opencode-plugin-cache-cwd-"));
     tempDirs.push(pluginCache);

@@ -33,7 +33,7 @@ const server = new McpServer(
     name: "opencode-plugin-codex",
     // Keep in step with package.json and .codex-plugin/plugin.json; test/version-sync.test.ts
     // fails the build when they drift, because this string is the version a caller sees on the wire.
-    version: "0.2.3"
+    version: "0.2.4"
   },
   {
     instructions:

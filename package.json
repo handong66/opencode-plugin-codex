@@ -1,6 +1,6 @@
 {
   "name": "opencode-plugin-codex",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Codex plugin that delegates work to OpenCode and transfers Codex threads into OpenCode sessions.",
   "type": "module",
   "private": false,

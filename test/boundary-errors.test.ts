@@ -2,7 +2,7 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { isBoundaryError, stateWriteFailed } from "../plugins/opencode-plugin-codex/src/boundary.js";
+import { isBoundaryError, stateWriteFailed, workspaceOutOfBounds } from "../plugins/opencode-plugin-codex/src/boundary.js";
 import { readEnvelope, type ToolErrorShape } from "./helpers/envelope.js";
 import { JobStore } from "../plugins/opencode-plugin-codex/src/job-store.js";
 import {
@@ -71,23 +71,15 @@ async function boundaryOf(run: () => Promise<unknown>): Promise<ToolErrorShape> 
 }
 
 describe("workspace boundary refusals carry a code and the roots", () => {
-  test("an out-of-bounds cwd names the available roots and why a new worktree is rejected", async () => {
-    const outside = await mkdtemp(join(tmpdir(), "opencode-plugin-codex-outside-"));
-    try {
-      const error = await withRoots([process.cwd()], () =>
-        boundaryOf(() => opencodeRun({ cwd: outside, prompt: "boundary probe" }))
-      );
+  test("an internal out-of-bounds path names the roots and the public per-call cwd remedy", () => {
+    const error = workspaceOutOfBounds("/elsewhere/repo", ["/work/a", "/work/b"]);
 
-      expect(error.code).toBe("workspace_out_of_bounds");
-      expect(error.retryable).toBe(false);
-      // Three of the four recorded refusals named a worktree that ran jobs normally
-      // the next day, once Codex's per-call workspace metadata caught up.
-      expect(error.message).toContain(process.cwd());
-      expect(error.message).toContain("per-call Codex workspace roots");
-      expect((error.details as { roots: string[] }).roots).toContain(process.cwd());
-    } finally {
-      await rm(outside, { recursive: true, force: true });
-    }
+    expect(error.code).toBe("workspace_out_of_bounds");
+    expect(error.retryable).toBe(false);
+    expect(error.message).toContain("/work/a");
+    expect(error.message).toContain("explicit absolute cwd");
+    expect(error.message).toContain("this call");
+    expect(error.details).toEqual({ candidate: "/elsewhere/repo", roots: ["/work/a", "/work/b"] });
   });
 
   test("no workspace root at all is workspace_unavailable, and execution still refuses", async () => {

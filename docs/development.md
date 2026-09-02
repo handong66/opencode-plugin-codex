@@ -24,7 +24,7 @@ Both files are tracked release artifacts and must be regenerated after source ch
 
 ### Foreground
 
-1. When the caller supplies an absolute `cwd`, accept its resolved existing directory as the workspace root. Otherwise resolve a default from standard MCP roots, current Codex per-call workspace metadata, a matching persisted current-thread rollout, or explicit `OPENCODE_WORKSPACE_ROOTS`; accept metadata as either a decoded object or a bounded JSON string, refresh standard roots for each call because a client may change them, and never treat the plugin cache process directory as a project root.
+1. When the caller supplies an absolute `cwd`, accept its resolved existing directory as a per-call workspace root even if advertised roots are empty or unrelated; never persist that caller grant. Otherwise resolve a default from standard MCP roots, current Codex per-call workspace metadata, a matching persisted current-thread rollout, or explicit `OPENCODE_WORKSPACE_ROOTS`; accept metadata as either a decoded object or a bounded JSON string, refresh standard roots for each call because a client may change them, and never treat the plugin cache process directory as a project root.
 2. Resolve every attachment with `realpath`; require an in-`cwd` regular file.
 3. Discover OpenCode from trusted server environment/common paths.
 4. Build argument-array flags. Send the prompt through stdin.

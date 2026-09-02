@@ -2,7 +2,7 @@ import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
-import { opencodeSessions } from "../plugins/opencode-plugin-codex/src/tools.js";
+import { configureWorkspaceRootsProvider, opencodeSessions } from "../plugins/opencode-plugin-codex/src/tools.js";
 import { resetOpenCodeDiscoveryCache } from "../plugins/opencode-plugin-codex/src/opencode-cli.js";
 import { readEnvelope, refusalOf } from "./helpers/envelope.js";
 
@@ -17,6 +17,7 @@ type SessionsData = {
 
 afterEach(() => {
   resetOpenCodeDiscoveryCache();
+  configureWorkspaceRootsProvider(async () => [process.cwd()]);
 });
 
 /** The shape `opencode session list --format json` returns on CLI 1.18.16. */
@@ -99,6 +100,20 @@ describe("opencode_sessions", () => {
 
       expect(result.sessions.map((session) => session.id)).toEqual(["ses_here", "ses_elsewhere"]);
       expect(result.filteredToWorkspaceRoots).toBe(false);
+    });
+  });
+
+  test("scopes to explicit cwd even when an advertised root is stale", async () => {
+    const staleRoot = await mkdtemp(join(tmpdir(), "opencode-plugin-codex-stale-session-root-"));
+    await rm(staleRoot, { recursive: true, force: true });
+    configureWorkspaceRootsProvider(async () => [staleRoot]);
+    const sessions = JSON.parse(JSON.stringify(SESSIONS).replace("CWD_PLACEHOLDER", process.cwd()));
+
+    await withSessionCli(listBody(sessions), async () => {
+      const result = readEnvelope<SessionsData>(await opencodeSessions({ cwd: process.cwd() }));
+
+      expect(result.sessions.map((session) => session.id)).toEqual(["ses_here"]);
+      expect(result.warnings).toEqual([]);
     });
   });
 

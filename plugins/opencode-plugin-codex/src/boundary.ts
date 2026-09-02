@@ -59,14 +59,10 @@ export function isBoundaryError(value: unknown): value is BoundaryError {
   return value instanceof BoundaryError;
 }
 
-/**
- * The sentence that resolves three of the four recorded out-of-bounds refusals: all
- * three named a `.worktrees/...` directory that started running jobs normally the
- * next day, once Codex's per-call workspace metadata caught up with it.
- */
+/** The explicit caller cwd is itself a per-call workspace source. */
 export const WORKSPACE_ROOTS_EXPLANATION =
-  "These are the per-call Codex workspace roots. A newly created worktree is rejected until it is added to the " +
-  "Codex workspace, so add it there (or pass a cwd inside an existing root) rather than working around this.";
+  "Pass the target as an explicit absolute cwd to grant that canonical directory for this call, or choose a cwd " +
+  "inside one of the available roots. The caller cwd grant is not remembered for later calls.";
 
 export function workspaceOutOfBounds(candidate: string, roots: string[]): BoundaryError {
   return new BoundaryError(

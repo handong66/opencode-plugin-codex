@@ -1,4 +1,4 @@
-# Failure routing and polling contract (0.2.3)
+# Failure routing and polling contract (0.2.4)
 
 This file ships with the plugin, so it is version-bound to the code that implements
 it. It carries only contract facts: which code means what, which field is the

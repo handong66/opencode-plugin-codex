@@ -1,7 +1,7 @@
 # Verification
 
-Last verified on 2026-08-19 against OpenCode CLI 1.18.16 (Node v25.9.0, npm 11.12.1,
-macOS). Every entry below must carry its own date and CLI version: the previous
+Last verified offline on 2026-09-01 with a fake OpenCode CLI (Node v25.9.0, macOS).
+The most recent real-CLI record remains 2026-08-19 against OpenCode CLI 1.18.16. Every entry below must carry its own date and CLI version: the previous
 record sat undated against CLI 1.17.15 for five weeks while the installed CLI moved on.
 
 ## Release matrix
@@ -16,6 +16,18 @@ uv run --with PyYAML python "$HOME/.codex/skills/.system/plugin-creator/scripts/
 uv run --with PyYAML python "$HOME/.codex/skills/.system/skill-creator/scripts/quick_validate.py" plugins/opencode-plugin-codex/skills/opencode
 git diff --check
 ```
+
+### 0.2.4 — 2026-09-01 (offline, fake OpenCode CLI, Node 25.9.0, macOS)
+
+- `npm run check`: typecheck and bundles passed; **33 test files / 280 tests** passed;
+  repository plugin validation passed; MCP smoke reported `11 tools available`.
+- `npm run test:integration`: **4 files / 31 tests** passed against built `dist/`. One earlier
+  run hit the existing background-lifecycle stdout timing race; the focused test and the final
+  complete integration run passed.
+- Coverage includes unrelated and stale root A with explicit cwd B, the exact canonical `--dir`,
+  absence of implicit `--auto`, same-server no-memory behavior, and stale-root session scoping.
+- `git diff --check` passed. Real CLI/live transfer, installed-copy pickup, and external validators
+  were **not run** for this patch; installed pickup requires a fresh Codex task.
 
 ### 0.2.3 — 2026-08-19 (Codex CLI 0.144.1, OpenCode CLI 1.18.16, Node v25.9.0, macOS)
 

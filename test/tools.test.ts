@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -264,19 +264,23 @@ describe("opencodeRun", () => {
     }
   });
 
-  test("rejects working directories outside the MCP workspace", async () => {
+  test("accepts an explicit working directory outside ambient MCP roots without enabling auto approval", async () => {
     const outside = await mkdtemp(join(tmpdir(), "opencode-plugin-codex-outside-cwd-"));
     try {
-      const error = await refusalOf(() =>
-        opencodeRun({
+      const canonicalOutside = await realpath(outside);
+      await withFakeOpenCode(async () => {
+        const result = parseToolResult(await opencodeRun({
           cwd: outside,
           background: false,
           prompt: "do not leave the active workspace"
-        })
-      );
+        }));
+        const invocation = JSON.parse((result.stdout ?? "").trim()) as { args: string[] };
+        const dirIndex = invocation.args.indexOf("--dir");
 
-      expect(error.code).toBe("workspace_out_of_bounds");
-      expect(error.message).toMatch(/working directory.*outside.*workspace/i);
+        expect(result.ok).toBe(true);
+        expect(invocation.args[dirIndex + 1]).toBe(canonicalOutside);
+        expect(invocation.args).not.toContain("--auto");
+      });
     } finally {
       await rm(outside, { recursive: true, force: true });
     }

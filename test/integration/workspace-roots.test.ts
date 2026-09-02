@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -310,6 +310,92 @@ describe("installed MCP workspace roots", () => {
     expect(body.data.outputSummary).toMatchObject({
       resultComplete: true,
       finalText: "caller cwd accepted"
+    });
+
+    const followUp = responseJson(
+      await client.callTool({
+        name: "opencode_run",
+        arguments: { background: false, prompt: "prove caller cwd was not remembered" },
+        _meta: { "x-codex-turn-metadata": { workspaces: {} } }
+      })
+    );
+    expect(followUp.ok).toBe(false);
+    expect(followUp.error.code).toBe("workspace_unavailable");
+  });
+
+  test("starts opencode_run from an explicit cwd outside an unrelated advertised root", async () => {
+    const script = [
+      "#!/usr/bin/env node",
+      "if (process.argv[2] === '--version') { console.log('1.17.15'); process.exit(0); }",
+      "if (process.argv[2] === 'run') {",
+      "  const argv = process.argv.slice(2);",
+      "  const dir = argv[argv.indexOf('--dir') + 1];",
+      "  const permission = argv.includes('--auto') ? 'auto=true' : 'auto=false';",
+      "  process.stdin.resume();",
+      "  process.stdin.on('end', () => {",
+      "    console.log(JSON.stringify({ type: 'step_start', sessionID: 'ses_unrelated_root', part: { type: 'step-start' } }));",
+      "    console.log(JSON.stringify({ type: 'text', sessionID: 'ses_unrelated_root', part: { type: 'text', text: 'cwd=' + dir + ';' + permission } }));",
+      "    console.log(JSON.stringify({ type: 'step_finish', sessionID: 'ses_unrelated_root', part: { type: 'step-finish', reason: 'stop' } }));",
+      "  });",
+      "}"
+    ].join("\n");
+    const unrelatedRoot = await mkdtemp(join(tmpdir(), "opencode-plugin-codex-unrelated-root-"));
+    tempDirs.push(unrelatedRoot);
+    const { client, workspace } = await workspaceClient({
+      name: "opencode-plugin-cache-unrelated-root-run",
+      roots: async () => ({ roots: [{ uri: pathToFileURL(unrelatedRoot).href, name: "root-a" }] }),
+      script
+    });
+
+    const body = responseJson(
+      await client.callTool({
+        name: "opencode_run",
+        arguments: { cwd: workspace, background: false, prompt: "prove cwd B is independently granted" },
+        _meta: { "x-codex-turn-metadata": { workspaces: {} } }
+      })
+    );
+
+    expect(body.ok).toBe(true);
+    expect(body.data.outputSummary).toMatchObject({
+      resultComplete: true,
+      finalText: `cwd=${workspace};auto=false`
+    });
+
+    const fallback = responseJson(
+      await client.callTool({
+        name: "opencode_run",
+        arguments: { background: false, prompt: "prove cwd B was not remembered" },
+        _meta: { "x-codex-turn-metadata": { workspaces: {} } }
+      })
+    );
+    const canonicalUnrelatedRoot = await realpath(unrelatedRoot);
+    expect(fallback.ok).toBe(true);
+    expect(fallback.data.outputSummary).toMatchObject({
+      resultComplete: true,
+      finalText: `cwd=${canonicalUnrelatedRoot};auto=false`
+    });
+  });
+
+  test("ignores a stale advertised root when an explicit cwd grants a valid target", async () => {
+    const staleRoot = await mkdtemp(join(tmpdir(), "opencode-plugin-codex-stale-root-"));
+    await rm(staleRoot, { recursive: true, force: true });
+    const { client, workspace } = await workspaceClient({
+      name: "opencode-plugin-cache-stale-root-caller-cwd",
+      roots: async () => ({ roots: [{ uri: pathToFileURL(staleRoot).href, name: "stale-root-a" }] })
+    });
+
+    const body = responseJson(
+      await client.callTool({
+        name: "opencode_check",
+        arguments: { cwd: workspace, includeModels: false },
+        _meta: { "x-codex-turn-metadata": { workspaces: {} } }
+      })
+    );
+
+    expect(body.data.workspace).toEqual({ ok: true, cwd: workspace });
+    expect(body.data.workspaceSources).toMatchObject({
+      rootsList: { supported: true, ok: true, count: 1 },
+      callerCwd: { provided: true, ok: true, count: 1 }
     });
   });
 

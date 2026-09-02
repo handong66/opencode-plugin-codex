@@ -89,19 +89,15 @@ describe("every tool returns the same envelope", () => {
   });
 
   test("a refusal is the same envelope with a typed error and no data", async () => {
-    const outside = await mkdtemp(join(tmpdir(), "opencode-plugin-codex-wire-outside-"));
+    const outside = join(tmpdir(), "opencode-plugin-codex-wire-missing", "does-not-exist");
     configureWorkspaceRootsProvider(async () => [process.cwd()]);
-    try {
-      const wire = (await opencodeRun({ cwd: outside, prompt: "wire probe" }))
-        .structuredContent as Wire;
+    const wire = (await opencodeRun({ cwd: outside, prompt: "wire probe" }))
+      .structuredContent as Wire;
 
-      expect(wire.ok).toBe(false);
-      expect(wire.error?.code).toBe("workspace_out_of_bounds");
-      expect(wire.error?.retryable).toBe(false);
-      expect(wire.warnings).toEqual([]);
-      expect(wire.data).toBeUndefined();
-    } finally {
-      await rm(outside, { recursive: true, force: true });
-    }
+    expect(wire.ok).toBe(false);
+    expect(wire.error?.code).toBe("workspace_out_of_bounds");
+    expect(wire.error?.retryable).toBe(false);
+    expect(wire.warnings).toEqual([]);
+    expect(wire.data).toBeUndefined();
   });
 });

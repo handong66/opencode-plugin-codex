@@ -3,6 +3,16 @@
 Notable changes to `opencode-plugin-codex`. Proposal ids (`OC-*`, `M*`) refer to the
 2026-08-16 Grok/OpenCode plugin collaboration audit.
 
+## 0.2.4 — 2026-09-01
+
+- Lock the existing per-call caller-cwd behavior with an MCP execution test where Codex advertises
+  root A and the dispatched task names workspace B.
+- Resolve and validate explicit `cwd` independently, so a stale or deleted advertised root cannot
+  veto a valid caller grant. Ambient roots remain fail-closed when `cwd` is omitted.
+- Clarify that an explicit absolute `cwd` grants its canonical directory for that call and is not
+  remembered; it does not require adding the directory to advertised workspace roots.
+- Replace stale out-of-bounds guidance without changing OpenCode's operation approval defaults.
+
 ## 0.2.3 — 2026-08-19
 
 ### Fixed

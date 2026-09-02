@@ -134,7 +134,8 @@ function normalizeWorkspaceRootsProviderResult(
 async function resolvedWorkspaceRootsContext(
   requestWorkspaceRoots: string[] = [],
   requestMeta: WorkspaceRequestMetaDiagnostics = MISSING_REQUEST_META,
-  additionalSources: WorkspaceAdditionalSourcesDiagnostics = {}
+  additionalSources: WorkspaceAdditionalSourcesDiagnostics = {},
+  options: { explicitCwd?: string } = {}
 ): Promise<{ roots: string[]; sources: WorkspaceSourcesDiagnostics }> {
   const standard = await workspaceRootsProvider()
     .then(normalizeWorkspaceRootsProviderResult)
@@ -143,6 +144,22 @@ async function resolvedWorkspaceRootsContext(
       diagnostics: { supported: true, ok: false, count: 0, errorCode: "provider_failed" }
     }));
   const sources = { rootsList: standard.diagnostics, requestMeta, ...additionalSources };
+  if (options.explicitCwd !== undefined) {
+    if (!isAbsolute(options.explicitCwd)) {
+      throw workspaceUnavailable("An explicit working directory must be an absolute path.", {
+        workspaceSources: sources
+      });
+    }
+    try {
+      return { roots: [await canonicalExplicitCwd(options.explicitCwd)], sources };
+    } catch (error) {
+      if (!isBoundaryError(error)) throw error;
+      throw new BoundaryError(error.code, error.message, {
+        ...error.details,
+        workspaceSources: sources
+      });
+    }
+  }
   const providedRoots = [...new Set([...standard.roots, ...requestWorkspaceRoots])];
   // Deliberately still Promise.all and still fail-closed: no recorded event ever hit
   // a root realpath failure, and loosening a boundary for a hypothetical is a bad
@@ -174,6 +191,19 @@ async function resolvedWorkspaceRootsContext(
     );
   }
   return { roots: workspaceRoots, sources };
+}
+
+async function canonicalExplicitCwd(cwd: string): Promise<string> {
+  let candidate: string;
+  try {
+    candidate = await realpath(cwd);
+  } catch {
+    throw new BoundaryError("workspace_out_of_bounds", "The explicit working directory does not exist.");
+  }
+  if (!(await stat(candidate)).isDirectory()) {
+    throw new BoundaryError("workspace_out_of_bounds", "The explicit working directory is not a directory.");
+  }
+  return candidate;
 }
 
 async function resolvedWorkspaceRoots(
@@ -217,7 +247,8 @@ async function cwdOrDefault(
   const context = await resolvedWorkspaceRootsContext(
     requestWorkspaceRoots,
     requestMeta,
-    additionalSources
+    additionalSources,
+    { explicitCwd: cwd }
   );
   return cwdWithinWorkspace(cwd, context.roots);
 }
@@ -773,7 +804,8 @@ async function opencodeCheckImpl(
     const context = await resolvedWorkspaceRootsContext(
       args._workspaceRoots,
       args._workspaceRequestMeta,
-      args._workspaceAdditionalSources
+      args._workspaceAdditionalSources,
+      { explicitCwd: args.cwd }
     );
     data.workspaceSources = context.sources;
     cwd = await cwdWithinWorkspace(args.cwd, context.roots);
@@ -1382,17 +1414,14 @@ export async function opencodeSessions(args: CommonArgs & { limit?: number; incl
 }
 
 async function opencodeSessionsImpl(args: CommonArgs & { limit?: number; includeAllDirectories?: boolean }) {
-  const roots = await resolvedWorkspaceRoots(
+  const context = await resolvedWorkspaceRootsContext(
     args._workspaceRoots,
     args._workspaceRequestMeta,
-    args._workspaceAdditionalSources
+    args._workspaceAdditionalSources,
+    { explicitCwd: args.cwd }
   );
-  const cwd = await cwdOrDefault(
-    args.cwd,
-    args._workspaceRoots,
-    args._workspaceRequestMeta,
-    args._workspaceAdditionalSources
-  );
+  const roots = context.roots;
+  const cwd = await cwdWithinWorkspace(args.cwd, roots);
   const limit = Math.min(Math.max(args.limit ?? 20, 1), 100);
   const warnings: string[] = [];
 

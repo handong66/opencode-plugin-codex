@@ -1,5 +1,39 @@
 # opencode-plugin-codex
 
+<!-- archived-notice -->
+> [!WARNING]
+> **Archived on 2026-10-05 and no longer maintained.** The successor is **[Turnweft](https://github.com/handong66/turnweft)**: one runtime that lets Claude Code and Codex hand work to Grok, OpenCode, agy, Droid and Dim in your real project, with sessions you can resume later.
+>
+> Turnweft is not yet a full replacement. It is an alpha release that runs on macOS only, and it does not include dedicated adversarial-review and conversation-import tools. If you still need this plugin, the last version here keeps working as it is, but it will get no further fixes.
+>
+> **已于 2026-10-05 归档，不再维护。** 后继项目是 **[Turnweft](https://github.com/handong66/turnweft)**：用一个运行时让 Claude Code 和 Codex 把任务交给 Grok、OpenCode、agy、Droid 和 Dim，在真实项目里执行，会话以后还能接着用。
+>
+> Turnweft 目前还不能完全替代本插件：它是 alpha 版本，只支持 macOS，也没有专门的对抗式审查工具和对话导入工具。如果仍需要本插件，可以继续使用这里的最后一个版本，但不会再有修复。
+
+<details>
+<summary>Move to Turnweft · 迁移到 Turnweft (Codex)</summary>
+
+Remove this plugin · 卸载本插件:
+
+```
+codex plugin remove opencode-plugin-codex@opencode-plugin-codex
+codex plugin marketplace remove opencode-plugin-codex
+```
+
+Install Turnweft (Node.js 22.13+) · 安装 Turnweft（需要 Node.js 22.13 或更高版本）:
+
+```bash
+npm install -g turnweft
+codex plugin marketplace add handong66/turnweft
+codex plugin add turnweft@turnweft
+```
+
+Then start a new conversation and ask in plain language, for example "Ask Grok to review my last commit. Read only." See the [Turnweft README](https://github.com/handong66/turnweft#readme) for details.
+
+然后新开一个对话，直接用自然语言提出要求，例如"让 Grok 只读审查我最近一次提交"。详见 [Turnweft 中文说明](https://github.com/handong66/turnweft/blob/main/README.zh-CN.md)。
+
+</details>
+
 Use OpenCode as a bounded second agent from Codex. This repository packages a Codex plugin with a Node stdio MCP server, a concise built-in OpenCode Skill, tests, and runtime smokes.
 
 Codex remains the owner of scope, workspace state, verification, git, and final judgment. OpenCode may review, diagnose, continue a session, or perform explicitly authorized narrow work; it must not commit, push, deploy, clean the worktree, or read hidden Codex context.
